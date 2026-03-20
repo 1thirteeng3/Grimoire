@@ -9,7 +9,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.models.pacts import StatelessPactModel, ToolCallIntent
-from app.persistence.sqlite_layer import fetch_pact, record_pact_audit_event, update_pact_status
+from app.persistence.sqlite_layer import (
+    fetch_pact,
+    fetch_pact_any_status,
+    fetch_pact_audit_events,
+    record_pact_audit_event,
+    update_pact_status,
+)
 
 router = APIRouter(tags=["pacts"])
 
@@ -21,6 +27,22 @@ class PactResolveRequest(BaseModel):
 
 def _secret_key() -> bytes:
     return os.getenv("GRIMOIRE_PACT_HMAC_SECRET", "dev-insecure-secret").encode()
+
+
+@router.get("/pacts/{pact_id}/audit")
+async def get_pact_audit(pact_id: str):
+    pact_row = await fetch_pact_any_status(pact_id)
+    if pact_row is None:
+        return JSONResponse(status_code=404, content={"error_code": "PACT_NOT_FOUND"})
+
+    events = await fetch_pact_audit_events(pact_id)
+    return {
+        "pact_id": pact_id,
+        "session_id": pact_row["session_id"],
+        "fsm_status": pact_row["fsm_status"],
+        "event_count": len(events),
+        "events": events,
+    }
 
 
 @router.post("/pacts/{pact_id}/resolve")

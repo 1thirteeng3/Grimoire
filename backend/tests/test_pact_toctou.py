@@ -77,6 +77,14 @@ async def test_valid_pact_resolves_normally(client: AsyncClient, test_db):
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
 
+    audit_response = await client.get(f"/api/v1/pacts/{pact_id}/audit")
+    assert audit_response.status_code == 200
+    payload = audit_response.json()
+    assert payload["pact_id"] == pact_id
+    assert payload["event_count"] >= 1
+    event_types = [event["event_type"] for event in payload["events"]]
+    assert "PACT_APPROVED_BY_HUMAN" in event_types
+
 
 @pytest.mark.asyncio
 async def test_invalid_signature_returns_403(client: AsyncClient, test_db):
@@ -105,3 +113,11 @@ async def test_invalid_signature_returns_403(client: AsyncClient, test_db):
     )
     assert response.status_code == 403
     assert response.json()["error_code"] == "PACT_SIGNATURE_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_pact_audit_not_found_returns_404(client: AsyncClient, test_db):
+    del test_db
+    response = await client.get(f"/api/v1/pacts/{uuid.uuid4()}/audit")
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "PACT_NOT_FOUND"

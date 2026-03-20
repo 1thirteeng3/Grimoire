@@ -122,6 +122,14 @@ async def fetch_pact(pact_id: str) -> dict[str, Any] | None:
             return dict(row) if row else None
 
 
+async def fetch_pact_any_status(pact_id: str) -> dict[str, Any] | None:
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM pending_pacts WHERE pact_id=?", (pact_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
 async def update_pact_status(pact_id: str, status: str) -> None:
     async with aiosqlite.connect(_ensure_db_path()) as db:
         await db.execute("UPDATE pending_pacts SET fsm_status=? WHERE pact_id=?", (status, pact_id))

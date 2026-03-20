@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.models.pacts import StatelessPactModel, ToolCallIntent
-from app.persistence.sqlite_layer import fetch_pact, update_pact_status
+from app.persistence.sqlite_layer import fetch_pact, record_pact_audit_event, update_pact_status
 
 router = APIRouter(tags=["pacts"])
 
@@ -43,6 +43,12 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
     }
     pact = StatelessPactModel.model_validate(pact_payload)
     if pact.is_expired():
+        await record_pact_audit_event(
+            pact_id,
+            pact.session_id,
+            "PACT_EXPIRED",
+            {"source": "REST", "action_attempted": payload.action},
+        )
         return JSONResponse(
             status_code=410,
             content={
@@ -52,6 +58,12 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
         )
 
     if not pact.verify_signature(_secret_key()):
+        await record_pact_audit_event(
+            pact_id,
+            pact.session_id,
+            "PACT_SIGNATURE_INVALID",
+            {"source": "REST", "action_attempted": payload.action},
+        )
         return JSONResponse(
             status_code=403,
             content={"error_code": "PACT_SIGNATURE_INVALID", "message": "Assinatura inválida."},
@@ -59,6 +71,12 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
 
     if payload.action == "ABORT":
         await update_pact_status(pact_id, "ABORTED")
+        await record_pact_audit_event(
+            pact_id,
+            pact.session_id,
+            "PACT_ABORTED_BY_HUMAN",
+            {"source": "REST"},
+        )
         return {"status": "aborted", "pact_id": pact_id}
 
     if payload.action == "MODIFY_AND_APPROVE" and payload.modified_arguments:
@@ -68,7 +86,21 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
             literal_arguments=payload.modified_arguments,
         )
 
+        await record_pact_audit_event(
+            pact_id,
+            pact.session_id,
+            "PACT_FORCED_BY_HUMAN",
+            {"source": "REST", "modified_keys": sorted(payload.modified_arguments.keys())},
+        )
+
     await update_pact_status(pact_id, "APPROVED")
+    if payload.action == "APPROVE_AS_IS":
+        await record_pact_audit_event(
+            pact_id,
+            pact.session_id,
+            "PACT_APPROVED_BY_HUMAN",
+            {"source": "REST"},
+        )
     return {
         "status": "approved",
         "pact_id": pact_id,

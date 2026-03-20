@@ -1,8 +1,10 @@
 import json
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import aiosqlite
 
@@ -43,8 +45,19 @@ CREATE TABLE IF NOT EXISTS routing_events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pact_audit_events (
+    event_id TEXT PRIMARY KEY,
+    pact_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    detail_json TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_pacts_ttl ON pending_pacts(ttl_timestamp);
 CREATE INDEX IF NOT EXISTS idx_pacts_session ON pending_pacts(session_id);
+CREATE INDEX IF NOT EXISTS idx_pact_audit_pact ON pact_audit_events(pact_id);
+CREATE INDEX IF NOT EXISTS idx_pact_audit_session ON pact_audit_events(session_id);
 """
 
 
@@ -150,3 +163,40 @@ async def purge_expired_pacts() -> int:
     if deleted:
         logger.info("GC: %s Pacto(s) expirado(s) purgado(s)", deleted)
     return deleted
+
+
+async def record_pact_audit_event(
+    pact_id: str, session_id: str, event_type: str, detail: dict[str, Any] | None = None
+) -> None:
+    payload = json.dumps(detail or {}, ensure_ascii=False)
+    created_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        await db.execute(
+            """
+            INSERT INTO pact_audit_events (event_id, pact_id, session_id, event_type, detail_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (str(uuid4()), pact_id, session_id, event_type, payload, created_at),
+        )
+        await db.commit()
+
+
+async def fetch_pact_audit_events(pact_id: str) -> list[dict[str, Any]]:
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT event_id, pact_id, session_id, event_type, detail_json, created_at
+            FROM pact_audit_events
+            WHERE pact_id=?
+            ORDER BY created_at ASC
+            """,
+            (pact_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        event = dict(row)
+        event["detail_json"] = json.loads(event.get("detail_json") or "{}")
+        events.append(event)
+    return events

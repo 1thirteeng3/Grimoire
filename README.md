@@ -54,3 +54,13 @@ devcontainer-based runs.
   - `GRIMOIRE_DEEPSEEK_API_URL` (default `https://api.deepseek.com/v1`)
   - `GRIMOIRE_DEFAULT_OPERATOR_MODEL` (default `deepseek-chat`)
   - `GRIMOIRE_LLM_TIMEOUT_SECONDS`, `GRIMOIRE_LLM_MAX_TOKENS`, `GRIMOIRE_LLM_TEMPERATURE`
+
+### Human-in-the-loop pact loop
+
+- `INTENT_SUBMIT` now emits `PACT_REQUEST` when risk is detected (e.g. shadowed chunks,
+  dangerous command pattern, or `force_human_approval=true`).
+- `PACT_RESOLVE` now applies decision effectively:
+  - `APPROVE_AS_IS`: executes stored proposal
+  - `MODIFY_AND_APPROVE`: executes overridden arguments and marks pact as `FORCED`
+  - `ABORT`: cancels execution
+- Full audit trail is persisted in SQLite table `pact_audit_events`.

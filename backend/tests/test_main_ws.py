@@ -1,4 +1,5 @@
 import json
+import asyncio
 
 from fastapi.testclient import TestClient
 
@@ -83,3 +84,100 @@ def test_websocket_streams_llm_response(isolated_settings, monkeypatch):
             execution = _receive_until(ws, "EXECUTION_SUCCESS")
             assert execution["payload"]["exit_code"] == 0
             assert "Olá mundo" in execution["payload"]["stdout"]
+
+
+def test_websocket_pact_request_and_resolve_flow(isolated_settings, monkeypatch):
+    async def fake_stream(*args, **kwargs):
+        del args, kwargs
+        for token in ["Aprovado", " com", " pacto"]:
+            yield token
+
+    monkeypatch.setattr("app.api.ws_gateway.stream_operator_response", fake_stream)
+    monkeypatch.setattr(
+        "app.api.ws_gateway.build_rag_context",
+        lambda **kwargs: RAGContext(
+            chunks_xml="<retrieved_chunks><retrieved_chunk source='x' relevance='1.0'><shadowed_text warning='x'>y</shadowed_text></retrieved_chunk></retrieved_chunks>",
+            constitution="<leis_ativas/>",
+            top_k=1,
+            shadowed_count=1,
+            domains=["generic"],
+            prompt_bloat=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session_pact_loop_001") as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "INTENT_SUBMIT",
+                        "query": "Faça um deploy",
+                        "chunks": [],
+                        "domains": ["generic"],
+                    }
+                )
+            )
+            pact_event = _receive_until(ws, "PACT_REQUEST")
+            pact_id = pact_event["payload"]["pact_id"]
+            assert pact_id
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "PACT_RESOLVE",
+                        "pact_id": pact_id,
+                        "action": "APPROVE_AS_IS",
+                    }
+                )
+            )
+            execution = _receive_until(ws, "EXECUTION_SUCCESS", max_reads=30)
+            assert "Aprovado com pacto" in execution["payload"]["stdout"]
+
+    from app.persistence.sqlite_layer import fetch_pact_audit_events
+
+    audit_events = asyncio.run(fetch_pact_audit_events(pact_id))
+    event_types = [event["event_type"] for event in audit_events]
+    assert "PACT_CREATED" in event_types
+    assert "PACT_REQUEST_EMITTED" in event_types
+    assert "PACT_APPROVED_BY_HUMAN" in event_types
+    assert "EXECUTION_STARTED" in event_types
+    assert "EXECUTION_SUCCEEDED" in event_types
+
+
+def test_websocket_pact_abort_flow(isolated_settings, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.ws_gateway.build_rag_context",
+        lambda **kwargs: RAGContext(
+            chunks_xml="<retrieved_chunks/>",
+            constitution="<leis_ativas/>",
+            top_k=1,
+            shadowed_count=1,
+            domains=["generic"],
+            prompt_bloat=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session_pact_abort_001") as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "INTENT_SUBMIT",
+                        "query": "rm -rf /tmp",
+                        "chunks": [],
+                        "domains": ["generic"],
+                    }
+                )
+            )
+            pact_event = _receive_until(ws, "PACT_REQUEST")
+            pact_id = pact_event["payload"]["pact_id"]
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "PACT_RESOLVE",
+                        "pact_id": pact_id,
+                        "action": "ABORT",
+                    }
+                )
+            )
+            message = _receive_until(ws, "STREAM_TOKEN")
+            assert "abortado" in message["payload"]["delta"].lower()

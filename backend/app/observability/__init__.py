@@ -4,6 +4,7 @@ from app.observability.telemetry import (
     record_stage_latency,
     record_tokens,
     reset_telemetry,
+    telemetry_prometheus,
     telemetry_snapshot,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "record_stage_latency",
     "record_tokens",
     "reset_telemetry",
+    "telemetry_prometheus",
     "telemetry_snapshot",
 ]

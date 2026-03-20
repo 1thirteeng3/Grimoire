@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.observability_router import router as observability_router
+from app.api.observability_router import prometheus_router, router as observability_router
 from app.api.pacts_router import router as pacts_router
 from app.api.ws_gateway import router as ws_router
 from app.config import settings
@@ -66,6 +66,7 @@ app.add_middleware(
 app.include_router(ws_router)
 app.include_router(pacts_router, prefix="/api/v1")
 app.include_router(observability_router, prefix="/api/v1")
+app.include_router(prometheus_router)
 
 
 @app.get("/health")

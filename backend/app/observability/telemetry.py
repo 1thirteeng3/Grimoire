@@ -24,6 +24,10 @@ def _structured_log(event: str, **fields: Any) -> None:
     logger.info(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+def _escape_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
 def start_timer() -> float:
     return perf_counter()
 
@@ -116,6 +120,78 @@ def telemetry_snapshot() -> dict[str, Any]:
             "errors": dict(_error_stats),
             "error_rates_over_ws": error_rates,
         }
+
+
+def telemetry_prometheus() -> str:
+    with _lock:
+        stage_items = sorted(_stage_stats.items(), key=lambda item: item[0])
+        token_items = sorted(_token_stats.items(), key=lambda item: item[0])
+        error_items = sorted(_error_stats.items(), key=lambda item: item[0])
+        ws_total = _requests_total
+
+    lines: list[str] = [
+        "# HELP grimoire_ws_messages_total Total WebSocket messages processed.",
+        "# TYPE grimoire_ws_messages_total counter",
+        f"grimoire_ws_messages_total {ws_total}",
+        "# HELP grimoire_stage_operations_total Total operations by stage.",
+        "# TYPE grimoire_stage_operations_total counter",
+        "# HELP grimoire_stage_errors_total Total errors by stage.",
+        "# TYPE grimoire_stage_errors_total counter",
+        "# HELP grimoire_stage_latency_ms_total Total latency by stage in milliseconds.",
+        "# TYPE grimoire_stage_latency_ms_total counter",
+        "# HELP grimoire_stage_latency_ms_max Max latency by stage in milliseconds.",
+        "# TYPE grimoire_stage_latency_ms_max gauge",
+    ]
+
+    for stage, stats in stage_items:
+        safe_stage = _escape_label(stage)
+        lines.append(
+            f'grimoire_stage_operations_total{{stage="{safe_stage}"}} {int(stats["count"])}'
+        )
+        lines.append(f'grimoire_stage_errors_total{{stage="{safe_stage}"}} {int(stats["errors"])}')
+        lines.append(
+            f'grimoire_stage_latency_ms_total{{stage="{safe_stage}"}} {float(stats["total_ms"]):.6f}'
+        )
+        lines.append(
+            f'grimoire_stage_latency_ms_max{{stage="{safe_stage}"}} {float(stats["max_ms"]):.6f}'
+        )
+
+    lines.extend(
+        [
+            "# HELP grimoire_tokens_total Total tokens by direction.",
+            "# TYPE grimoire_tokens_total counter",
+        ]
+    )
+    for direction, count in token_items:
+        safe_direction = _escape_label(direction)
+        lines.append(f'grimoire_tokens_total{{direction="{safe_direction}"}} {int(count)}')
+
+    lines.extend(
+        [
+            "# HELP grimoire_errors_total Total errors by stage and type.",
+            "# TYPE grimoire_errors_total counter",
+            "# HELP grimoire_error_rate_over_ws Error rate over WS messages by stage and type.",
+            "# TYPE grimoire_error_rate_over_ws gauge",
+        ]
+    )
+    denominator = max(1, ws_total)
+    for key, count in error_items:
+        if ":" in key:
+            stage, error_type = key.split(":", 1)
+        else:
+            stage, error_type = "unknown", key
+        safe_stage = _escape_label(stage)
+        safe_error_type = _escape_label(error_type)
+        lines.append(
+            f'grimoire_errors_total{{stage="{safe_stage}",error_type="{safe_error_type}"}} {int(count)}'
+        )
+        lines.append(
+            "grimoire_error_rate_over_ws"
+            f'{{stage="{safe_stage}",error_type="{safe_error_type}"}} {count / denominator:.6f}'
+        )
+
+    lines.append("")
+    return "\n".join(lines)
 
 
 def reset_telemetry() -> None:

@@ -218,6 +218,61 @@ def test_observability_metrics_endpoint_tracks_ws_rag_llm(isolated_settings, mon
         assert payload["tokens"]["output"] > 0
 
 
+def test_prometheus_metrics_export_format(isolated_settings, monkeypatch):
+    async def fake_stream(*args, **kwargs):
+        del args, kwargs
+        for token in ["resposta", " final"]:
+            yield token
+
+    monkeypatch.setattr("app.api.ws_gateway.stream_operator_response", fake_stream)
+    monkeypatch.setattr(
+        "app.api.ws_gateway.build_rag_context",
+        lambda **kwargs: RAGContext(
+            chunks_xml="<retrieved_chunks/>",
+            constitution="<leis_ativas/>",
+            top_k=1,
+            shadowed_count=0,
+            domains=["generic"],
+            prompt_bloat=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session_obs_prom_001") as ws:
+            ws.send_text(json.dumps({"type": "INTENT_SUBMIT", "query": "responda", "chunks": [], "domains": []}))
+            _ = _receive_until(ws, "EXECUTION_SUCCESS")
+
+        metrics = client.get("/metrics")
+        assert metrics.status_code == 200
+        assert "text/plain" in metrics.headers["content-type"]
+        body = metrics.text
+        assert "# HELP grimoire_stage_latency_ms_total" in body
+        assert 'grimoire_stage_latency_ms_total{stage="LLM"}' in body
+        assert 'grimoire_tokens_total{direction="input"}' in body
+
+
+def test_prometheus_metrics_export_includes_error_series(isolated_settings, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.ws_gateway.build_rag_context",
+        lambda **kwargs: RAGContext(
+            chunks_xml="<retrieved_chunks/>",
+            constitution="",
+            top_k=5,
+            shadowed_count=0,
+            domains=["generic"],
+            prompt_bloat={"current_tokens": 9000, "limit": 4096, "domain": "generic"},
+        ),
+    )
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session_obs_prom_err_001") as ws:
+            ws.send_text(json.dumps({"type": "INTENT_SUBMIT", "query": "q", "chunks": [], "domains": ["generic"]}))
+            _ = _receive_until(ws, "PROMPT_BLOATING")
+
+        body = client.get("/metrics").text
+        assert 'grimoire_errors_total{stage="RAG",error_type="PROMPT_BLOAT"}' in body
+        assert 'grimoire_error_rate_over_ws{stage="RAG",error_type="PROMPT_BLOAT"}' in body
+
+
 def test_observability_error_rate_for_prompt_bloat(isolated_settings, monkeypatch):
     monkeypatch.setattr(
         "app.api.ws_gateway.build_rag_context",

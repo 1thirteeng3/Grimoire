@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run generate-types && tsc && vite build",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "generate-types": "tsx scripts/generate-types.ts",
+    "generate:rest-types": "tsx scripts/generate-types.ts",
+    "generate:ws-types": "tsx scripts/generate-ws-types.ts",
+    "generate-types": "npm run generate:rest-types && npm run generate:ws-types",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
     "@types/node": "^24.5.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "openapi-typescript": "^7.6.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

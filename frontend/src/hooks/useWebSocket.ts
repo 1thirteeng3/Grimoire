@@ -2,21 +2,9 @@ import { useCallback, useEffect, useRef } from "react";
 import type { MutableRefObject } from "react";
 
 import { useSystemStore } from "../store/system";
+import type { components as WsComponents } from "../types/ws_events";
 
-type PactRequestPayload = {
-  pact_id: string;
-  human_summary: string;
-  operator_proposal_raw: string;
-};
-
-type ServerEvent =
-  | { type: "STATE_RAG_RETRIEVAL"; payload: { documents_scanned: number } }
-  | { type: "STREAM_TOKEN"; payload: { delta: string } }
-  | { type: "CONFIDENCE_UPDATE"; payload: { state: "convergent" | "partial" | "conflict" } }
-  | { type: "PACT_REQUEST"; payload: PactRequestPayload }
-  | { type: "EXECUTION_SUCCESS"; payload: { stdout: string; exit_code: number } }
-  | { type: "PROMPT_BLOATING"; payload: { domain: string; current_tokens: number; limit: number } }
-  | { type: "PONG" };
+type ServerEvent = WsComponents["schemas"]["ServerEvent"] | { type: "PONG" };
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
 const PING_INTERVAL_MS = 15_000;

@@ -11,12 +11,18 @@ class ObsidianCliError(Exception):
 
 def _run_obsidian_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     cmd = [settings.obsidian_cli_binary, *args]
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=settings.obsidian_cli_timeout_seconds,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=settings.obsidian_cli_timeout_seconds,
+        )
+    except FileNotFoundError as exc:
+        raise ObsidianCliError(
+            f"Obsidian CLI não encontrado: '{settings.obsidian_cli_binary}'. "
+            "Configure GRIMOIRE_OBSIDIAN_CLI_BINARY corretamente."
+        ) from exc
     if result.returncode != 0:
         raise ObsidianCliError(result.stderr.strip() or f"Obsidian CLI failed: {' '.join(cmd)}")
     return result

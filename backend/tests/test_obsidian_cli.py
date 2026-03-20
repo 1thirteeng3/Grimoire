@@ -47,3 +47,12 @@ def test_obsidian_cli_error_raises(monkeypatch):
     )
     with pytest.raises(ObsidianCliError):
         read_note("x.md")
+
+
+def test_obsidian_cli_missing_binary_raises(monkeypatch):
+    def raise_not_found(*args, **kwargs):
+        raise FileNotFoundError("obsidian")
+
+    monkeypatch.setattr("app.integrations.obsidian_cli.subprocess.run", raise_not_found)
+    with pytest.raises(ObsidianCliError):
+        read_note("x.md")

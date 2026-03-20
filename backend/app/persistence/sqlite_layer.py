@@ -1,5 +1,6 @@
 import json
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,8 @@ import aiosqlite
 
 logger = logging.getLogger("grimoire.sqlite")
 DB_PATH: Path | None = None
+_SQLITE_VERSION = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
+_HAS_RETURNING = _SQLITE_VERSION >= (3, 35, 0)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_pacts (
@@ -49,6 +52,19 @@ def _ensure_db_path() -> Path:
     if DB_PATH is None:
         raise RuntimeError("SQLite DB_PATH não inicializado. Chame init_db() no startup.")
     return DB_PATH
+
+
+def check_sqlite_runtime_support() -> None:
+    version = sqlite3.sqlite_version
+    if _SQLITE_VERSION < (3, 31, 0):
+        raise RuntimeError(
+            f"SQLite {version} < 3.31.0 não suportado. "
+            "Atualize o sistema ou use Python com SQLite mais recente."
+        )
+    if not _HAS_RETURNING:
+        logger.warning(
+            "SQLite %s < 3.35.0: purge de pactos usará fallback sem RETURNING.", version
+        )
 
 
 async def init_db(db_path: Path) -> None:
@@ -118,10 +134,18 @@ async def fetch_session_summary(session_id: str) -> str | None:
 
 async def purge_expired_pacts() -> int:
     async with aiosqlite.connect(_ensure_db_path()) as db:
-        cur = await db.execute(
-            "DELETE FROM pending_pacts WHERE ttl_timestamp < datetime('now') RETURNING pact_id"
-        )
-        deleted = len(await cur.fetchall())
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                "DELETE FROM pending_pacts WHERE datetime(ttl_timestamp) < datetime('now') RETURNING pact_id"
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM pending_pacts WHERE datetime(ttl_timestamp) < datetime('now')"
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute("DELETE FROM pending_pacts WHERE datetime(ttl_timestamp) < datetime('now')")
         await db.commit()
     if deleted:
         logger.info("GC: %s Pacto(s) expirado(s) purgado(s)", deleted)

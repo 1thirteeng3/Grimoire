@@ -1,5 +1,5 @@
 from app.core.secrets import get_secret, set_secret
-from app.rag.shadowing import should_shadow
+from app.rag.shadowing import has_dangerous_command
 
 
 def test_secrets_keyring_wrapper(monkeypatch):
@@ -19,5 +19,5 @@ def test_secrets_keyring_wrapper(monkeypatch):
 
 
 def test_shadowing_patterns():
-    assert should_shadow("execute", "rm -rf /tmp/foo") is True
-    assert should_shadow("safe op", "list files only") is False
+    assert has_dangerous_command("rm -rf /tmp/foo") is True
+    assert has_dangerous_command("list files only") is False

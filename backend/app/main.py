@@ -8,7 +8,7 @@ from app.api.pacts_router import router as pacts_router
 from app.api.ws_gateway import router as ws_router
 from app.config import settings
 from app.core.entity_loader import load_and_validate_entities
-from app.persistence.sqlite_layer import init_db
+from app.persistence.sqlite_layer import check_sqlite_runtime_support, init_db
 from app.rag.jit_prompting import DogmasWatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     ]:
         path.mkdir(parents=True, exist_ok=True)
 
+    check_sqlite_runtime_support()
     await init_db(settings.data_path / "grimoire.db")
     logger.info("SQLite inicializado")
 

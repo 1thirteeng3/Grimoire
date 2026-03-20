@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
 
     honcho_api_url: str = "https://demo.honcho.dev"
+    honcho_app_id: str = ""
+    honcho_user_id: str = ""
 
     pact_ttl_seconds: int = 3600
     max_constitution_tokens: int = 4096

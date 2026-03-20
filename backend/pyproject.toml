@@ -1,6 +1,8 @@
 [project]
 name = "grimoire-backend"
 version = "0.1.0"
+# Runtime requirement note:
+# SQLite >= 3.31.0 required (fallback path when <3.35.0 without RETURNING).
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.111",

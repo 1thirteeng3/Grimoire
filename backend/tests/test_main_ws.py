@@ -56,3 +56,30 @@ def test_websocket_emits_prompt_bloating_event(isolated_settings, monkeypatch):
             ws.send_text(json.dumps({"type": "INTENT_SUBMIT", "query": "q", "chunks": [], "domains": ["generic"]}))
             event = _receive_until(ws, "PROMPT_BLOATING")
             assert event["payload"]["limit"] == 4096
+
+
+def test_websocket_streams_llm_response(isolated_settings, monkeypatch):
+    async def fake_stream(*args, **kwargs):
+        del args, kwargs
+        for token in ["Olá", " ", "mundo"]:
+            yield token
+
+    monkeypatch.setattr("app.api.ws_gateway.stream_operator_response", fake_stream)
+    monkeypatch.setattr(
+        "app.api.ws_gateway.build_rag_context",
+        lambda **kwargs: RAGContext(
+            chunks_xml="<retrieved_chunks/>",
+            constitution="<leis_ativas/>",
+            top_k=1,
+            shadowed_count=0,
+            domains=["generic"],
+            prompt_bloat=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/session_test_003") as ws:
+            ws.send_text(json.dumps({"type": "INTENT_SUBMIT", "query": "responda", "chunks": [], "domains": []}))
+            execution = _receive_until(ws, "EXECUTION_SUCCESS")
+            assert execution["payload"]["exit_code"] == 0
+            assert "Olá mundo" in execution["payload"]["stdout"]

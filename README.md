@@ -41,3 +41,16 @@ devcontainer-based runs.
   in `backend/app/integrations/obsidian_cli.py`.
 - The CLI binary is configurable via `GRIMOIRE_OBSIDIAN_CLI_BINARY`
   (default: `obsidian`).
+
+### LLM E2E (DeepSeek)
+
+- WebSocket `INTENT_SUBMIT` now executes full flow:
+  `PERCEPTION_ROUTING -> RAG_RETRIEVAL -> INTERNAL_ITERATION -> OPERATOR_READY -> EXECUTION`
+  with streamed `STREAM_TOKEN` events from DeepSeek.
+- Required API key sources (in priority order):
+  1. `GRIMOIRE_DEEPSEEK_API_KEY` environment variable
+  2. keyring entry `deepseek_api_key` (service `grimoire`)
+- Optional runtime parameters:
+  - `GRIMOIRE_DEEPSEEK_API_URL` (default `https://api.deepseek.com/v1`)
+  - `GRIMOIRE_DEFAULT_OPERATOR_MODEL` (default `deepseek-chat`)
+  - `GRIMOIRE_LLM_TIMEOUT_SECONDS`, `GRIMOIRE_LLM_MAX_TOKENS`, `GRIMOIRE_LLM_TEMPERATURE`

@@ -1,9 +1,13 @@
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.config import settings
 from app.core.fsm import FSMState, SessionContext, StateManager
+from app.integrations.obsidian_cli import ObsidianCliError, read_note
+from app.llm.deepseek_client import LLMConfigurationError, LLMProviderError, stream_operator_response
 from app.models.websocket import (
     ConfidenceUpdateEvent,
     ConfidenceUpdatePayload,
@@ -51,11 +55,53 @@ async def send_event(ws: WebSocket, event: ServerEvent) -> None:
     await ws.send_text(event.model_dump_json())
 
 
-async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> None:
+def _collect_chunks(message: dict[str, Any]) -> list[dict[str, str]]:
     raw_chunks = message.get("chunks", [])
-    if not isinstance(raw_chunks, list):
-        raw_chunks = []
+    chunks: list[dict[str, str]] = []
+    if isinstance(raw_chunks, list):
+        for chunk in raw_chunks:
+            if not isinstance(chunk, dict):
+                continue
+            text = chunk.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            chunks.append(
+                {
+                    "text": text,
+                    "source": str(chunk.get("source", "unknown")),
+                    "memory_type": str(chunk.get("memory_type", "vector_rag")),
+                }
+            )
+
+    note_paths = message.get("obsidian_note_paths", [])
+    if isinstance(note_paths, list):
+        for note_path in note_paths:
+            if not isinstance(note_path, str) or not note_path.strip():
+                continue
+            try:
+                note_content = read_note(note_path)
+            except ObsidianCliError as exc:
+                logger.warning("Falha ao ler nota Obsidian '%s': %s", note_path, exc)
+                continue
+            chunks.append(
+                {
+                    "text": note_content[: settings.obsidian_note_max_chars],
+                    "source": f"obsidian:{note_path}",
+                    "memory_type": "obsidian_vault",
+                }
+            )
+    return chunks
+
+
+async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> None:
     query = str(message.get("query", ""))
+    if not query.strip():
+        await send_event(
+            ws,
+            StreamTokenEvent(payload=StreamTokenPayload(delta="INTENT_SUBMIT sem query textual.")),
+        )
+        return
+    raw_chunks = _collect_chunks(message)
     domains = message.get("domains", ["generic"])
     if not isinstance(domains, list) or not domains:
         domains = ["generic"]
@@ -108,17 +154,67 @@ async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> 
     manager.transition(FSMState.INTERNAL_ITERATION)
     await send_event(
         ws,
-        ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="convergent")),
+        ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="partial")),
     )
     manager.transition(FSMState.OPERATOR_READY)
-    await send_event(
-        ws,
-        StreamTokenEvent(payload=StreamTokenPayload(delta=f"Contexto compilado ({rag_ctx.top_k} top chunks).")),
-    )
+    await send_event(ws, StreamTokenEvent(payload=StreamTokenPayload(delta="Contexto compilado. Iniciando LLM...")))
     manager.transition(FSMState.EXECUTION)
+
+    tokens: list[str] = []
+    try:
+        async for delta in stream_operator_response(
+            query=query,
+            constitution=rag_ctx.constitution,
+            chunks_xml=rag_ctx.chunks_xml,
+        ):
+            tokens.append(delta)
+            await send_event(ws, StreamTokenEvent(payload=StreamTokenPayload(delta=delta)))
+    except LLMConfigurationError as exc:
+        manager.transition(FSMState.ERROR)
+        await send_event(
+            ws,
+            ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="conflict")),
+        )
+        await send_event(
+            ws,
+            StreamTokenEvent(payload=StreamTokenPayload(delta=f"LLM não configurado: {exc}")),
+        )
+        manager.transition(FSMState.IDLE)
+        return
+    except LLMProviderError as exc:
+        manager.transition(FSMState.ERROR)
+        await send_event(
+            ws,
+            ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="conflict")),
+        )
+        await send_event(
+            ws,
+            StreamTokenEvent(payload=StreamTokenPayload(delta=f"Falha no provedor LLM: {exc}")),
+        )
+        manager.transition(FSMState.IDLE)
+        return
+    except Exception as exc:
+        logger.exception("Erro inesperado no streaming LLM: %s", exc)
+        manager.transition(FSMState.ERROR)
+        await send_event(
+            ws,
+            ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="conflict")),
+        )
+        await send_event(
+            ws,
+            StreamTokenEvent(payload=StreamTokenPayload(delta="Erro inesperado no operador LLM.")),
+        )
+        manager.transition(FSMState.IDLE)
+        return
+
+    final_text = "".join(tokens).strip() or "[sem conteúdo retornado pelo modelo]"
     await send_event(
         ws,
-        ExecutionSuccessEvent(payload=ExecutionSuccessPayload(stdout="Fase 0: execução simulada", exit_code=0)),
+        ConfidenceUpdateEvent(payload=ConfidenceUpdatePayload(state="convergent")),
+    )
+    await send_event(
+        ws,
+        ExecutionSuccessEvent(payload=ExecutionSuccessPayload(stdout=final_text, exit_code=0)),
     )
     manager.transition(FSMState.MEMORY_CONSOLIDATION)
     manager.transition(FSMState.IDLE)

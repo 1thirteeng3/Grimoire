@@ -23,11 +23,13 @@ def isolated_settings(tmp_path: Path):
 
 @pytest.fixture
 async def test_db(isolated_settings):
-    from app.persistence.sqlite_layer import init_db
+    from app.persistence import sqlite_layer
 
     db_path = isolated_settings.data_path / "test_grimoire.db"
-    await init_db(db_path)
-    return db_path
+    await sqlite_layer.init_db(db_path)
+    sqlite_layer.DB_PATH = db_path
+    yield db_path
+    sqlite_layer.DB_PATH = None
 
 
 @pytest.fixture

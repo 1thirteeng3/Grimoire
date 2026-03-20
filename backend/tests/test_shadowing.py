@@ -18,6 +18,13 @@ def test_conflito_porta_detectado():
     assert result.cosine_sim >= COSINE_THRESHOLD
 
 
+def test_port_and_porta_are_canonicalized():
+    rag = "Open port 80 for ingress"
+    dogma = "Nunca abrir porta 80 sem TLS"
+    result = check_shadow(rag, dogma)
+    assert result.should_shadow is True
+
+
 def test_sem_entidades_compartilhadas_nao_faz_shadow():
     rag = "Use Redis para cache de sessoes."
     dogma = "Nunca usar eval() em código Python."

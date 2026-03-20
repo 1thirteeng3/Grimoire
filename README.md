@@ -34,3 +34,10 @@ devcontainer-based runs.
   will try to produce them from backend code using `python3 -m uv run ...`.
 - If backend generation is unavailable, REST schema generation falls back to
   `http://localhost:8000/openapi.json`.
+
+### Obsidian integration
+
+- Grimoire <-> Obsidian integration is implemented through **Obsidian CLI** adapters
+  in `backend/app/integrations/obsidian_cli.py`.
+- The CLI binary is configurable via `GRIMOIRE_OBSIDIAN_CLI_BINARY`
+  (default: `obsidian`).

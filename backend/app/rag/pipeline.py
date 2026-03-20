@@ -5,7 +5,7 @@ Orquestrador do pipeline RAG completo.
 import logging
 from dataclasses import dataclass
 
-from app.rag.jit_prompting import _cache, compile_constitution
+from app.rag.jit_prompting import PromptBloatError, _cache, compile_constitution
 from app.rag.scoring import ScoredChunk, score_and_rank
 from app.rag.shadowing import process_chunk_against_dogmas
 
@@ -19,6 +19,7 @@ class RAGContext:
     top_k: int
     shadowed_count: int
     domains: list[str]
+    prompt_bloat: dict[str, int | str] | None = None
 
 
 def build_rag_context(query: str, raw_chunks: list[dict], domains: list[str], top_k: int = 5) -> RAGContext:
@@ -40,7 +41,22 @@ def build_rag_context(query: str, raw_chunks: list[dict], domains: list[str], to
         chunk_xmls.append(xml)
 
     chunks_xml = "<retrieved_chunks>\n" + "\n".join(chunk_xmls) + "\n</retrieved_chunks>"
-    constitution = compile_constitution(domains)
+    prompt_bloat: dict[str, int | str] | None = None
+    try:
+        constitution = compile_constitution(domains)
+    except PromptBloatError as exc:
+        constitution = ""
+        prompt_bloat = {
+            "current_tokens": exc.current_tokens,
+            "limit": exc.limit,
+            "domain": exc.domain,
+        }
+        logger.warning(
+            "Prompt bloating detectado: tokens=%s limit=%s domain=%s",
+            exc.current_tokens,
+            exc.limit,
+            exc.domain,
+        )
 
     logger.info(
         "Pipeline RAG: %d chunks → %d top_k → %d shadowed | domínios: %s",
@@ -55,4 +71,5 @@ def build_rag_context(query: str, raw_chunks: list[dict], domains: list[str], to
         top_k=top_k,
         shadowed_count=shadowed_count,
         domains=domains,
+        prompt_bloat=prompt_bloat,
     )

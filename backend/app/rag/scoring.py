@@ -5,6 +5,8 @@ Cross-Encoder scoring com logits brutos ONNX.
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from app.config import settings
 
 MEMORY_WEIGHTS: dict[str, float] = {
@@ -48,9 +50,28 @@ def score_and_rank(query: str, chunks: list[dict], top_k: int = 5) -> list[Score
     inputs = tokenizer(pairs, padding=True, truncation=True, max_length=512, return_tensors="pt")
 
     outputs = model(**inputs)
-    logits = outputs.logits.detach().numpy().squeeze().tolist()
-    if isinstance(logits, float):
-        logits = [logits]
+    raw_logits = np.asarray(outputs.logits.detach().numpy())
+    if raw_logits.ndim == 0:
+        logits = [float(raw_logits.item())]
+    elif raw_logits.ndim == 1:
+        if raw_logits.shape[0] == len(chunks):
+            logits = raw_logits.astype(float).tolist()
+        elif len(chunks) == 1:
+            # Explicit policy for single-sample multi-class outputs.
+            logits = [float(raw_logits[0])]
+        else:
+            raise ValueError(
+                f"Formato de logits 1D incompatível: shape={raw_logits.shape}, chunks={len(chunks)}"
+            )
+    elif raw_logits.ndim == 2:
+        if raw_logits.shape[0] != len(chunks):
+            raise ValueError(
+                f"Formato de logits 2D incompatível: shape={raw_logits.shape}, chunks={len(chunks)}"
+            )
+        # Explicit policy: use first class logit deterministically.
+        logits = raw_logits[:, 0].astype(float).tolist()
+    else:
+        raise ValueError(f"Formato de logits não suportado: shape={raw_logits.shape}")
 
     scored: list[ScoredChunk] = []
     for chunk, logit in zip(chunks, logits):

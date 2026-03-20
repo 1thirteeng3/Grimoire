@@ -15,8 +15,13 @@ export function useWebSocket(sessionId: string) {
   const ws = useRef<WebSocket | null>(null);
   const backoff = useRef(1000);
   const pongTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const shouldReconnect = useRef(true);
 
   const connect = useCallback(() => {
+    if (!shouldReconnect.current) {
+      return;
+    }
     ws.current = new WebSocket(`${WS_URL}/${sessionId}`);
     ws.current.onopen = () => {
       useSystemStore.getState().setConnected(true);
@@ -24,7 +29,10 @@ export function useWebSocket(sessionId: string) {
     };
     ws.current.onclose = () => {
       useSystemStore.getState().setConnected(false);
-      setTimeout(connect, backoff.current);
+      if (!shouldReconnect.current) {
+        return;
+      }
+      reconnectTimer.current = setTimeout(connect, backoff.current);
       backoff.current = Math.min(backoff.current * 2, MAX_BACKOFF_MS);
     };
     ws.current.onmessage = (evt) => {
@@ -34,6 +42,7 @@ export function useWebSocket(sessionId: string) {
   }, [sessionId]);
 
   useEffect(() => {
+    shouldReconnect.current = true;
     connect();
     const pingInterval = setInterval(() => {
       if (ws.current?.readyState === WebSocket.OPEN) {
@@ -45,7 +54,10 @@ export function useWebSocket(sessionId: string) {
     }, PING_INTERVAL_MS);
 
     return () => {
+      shouldReconnect.current = false;
       clearInterval(pingInterval);
+      clearTimeout(reconnectTimer.current);
+      clearTimeout(pongTimer.current);
       ws.current?.close();
     };
   }, [connect]);

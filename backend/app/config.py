@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     qdrant_mode: str = "path"
     qdrant_url: str = "http://localhost:6333"
 
+    obsidian_cli_binary: str = "obsidian"
+    obsidian_cli_timeout_seconds: int = 15
+
     honcho_api_url: str = "https://demo.honcho.dev"
     honcho_app_id: str = ""
     honcho_user_id: str = ""

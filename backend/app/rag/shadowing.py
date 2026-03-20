@@ -41,9 +41,16 @@ def has_dangerous_command(text: str) -> bool:
 
 def _extract_entities(text: str) -> set[str]:
     entities: set[str] = set()
-    for pattern in INFRA_PATTERNS.values():
+    for name, pattern in INFRA_PATTERNS.items():
         for match in pattern.finditer(text):
-            entities.add(match.group(0).lower().strip())
+            if name == "port":
+                entities.add(f"port:{match.group(1)}")
+            elif name == "ipv4":
+                entities.add(f"ipv4:{match.group(0)}")
+            elif name == "path":
+                entities.add(f"path:{match.group(0).lower().strip()}")
+            elif name == "env_var":
+                entities.add(f"env:{match.group(0).upper().strip()}")
     return entities
 
 

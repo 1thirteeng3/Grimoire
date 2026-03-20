@@ -53,7 +53,7 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
 
     if not pact.verify_signature(_secret_key()):
         return JSONResponse(
-            status_code=409,
+            status_code=403,
             content={"error_code": "PACT_SIGNATURE_INVALID", "message": "Assinatura inválida."},
         )
 

@@ -76,3 +76,32 @@ async def test_valid_pact_resolves_normally(client: AsyncClient, test_db):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_invalid_signature_returns_403(client: AsyncClient, test_db):
+    del test_db
+    from app.persistence.sqlite_layer import save_pact
+
+    pact_id = str(uuid.uuid4())
+    future_ttl = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    pact = {
+        "pact_id": pact_id,
+        "session_id": "sess_invalid_sig_001",
+        "entity_manifest_hash": "abc123",
+        "fsm_status": "PENDING_HUMAN_CONFLICT",
+        "operator_proposal_raw": "print('safe')",
+        "tool_intent": {"tool_name": "execute_python", "literal_arguments": {"code": "print('safe')"}},
+        "critic_report": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "ttl_timestamp": future_ttl,
+        "cryptographic_signature": "sha256=invalid",
+    }
+    await save_pact(json.dumps(pact), pact_id)
+
+    response = await client.post(
+        f"/api/v1/pacts/{pact_id}/resolve",
+        json={"action": "APPROVE_AS_IS", "modified_arguments": {}},
+    )
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "PACT_SIGNATURE_INVALID"

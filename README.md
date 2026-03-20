@@ -26,3 +26,11 @@ devcontainer-based runs.
 - `make backend-test-cov` — backend tests with coverage gate (>=80%)
 - `make frontend-verify` — generate-types + typecheck + build
 - `make verify` — backend + frontend verification pipeline
+
+### Frontend build behavior
+
+- `npm run build` runs `generate-types` first.
+- If `backend/openapi.json` or `backend/ws_events_schema.json` are missing, the generator
+  will try to produce them from backend code using `python3 -m uv run ...`.
+- If backend generation is unavailable, REST schema generation falls back to
+  `http://localhost:8000/openapi.json`.

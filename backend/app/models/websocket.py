@@ -66,6 +66,10 @@ class PromptBloatingEvent(BaseModel):
     payload: PromptBloatingPayload
 
 
+class PongEvent(BaseModel):
+    type: Literal["PONG"] = "PONG"
+
+
 ServerEvent = Annotated[
     Union[
         StateRAGRetrievalEvent,
@@ -74,6 +78,7 @@ ServerEvent = Annotated[
         PactRequestEvent,
         ExecutionSuccessEvent,
         PromptBloatingEvent,
+        PongEvent,
     ],
     Field(discriminator="type"),
 ]

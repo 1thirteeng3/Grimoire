@@ -4,7 +4,7 @@ import type { MutableRefObject } from "react";
 import { useSystemStore } from "../store/system";
 import type { components as WsComponents } from "../types/ws_events";
 
-type ServerEvent = WsComponents["schemas"]["ServerEvent"] | { type: "PONG" };
+type ServerEvent = WsComponents["schemas"]["ServerEvent"];
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
 const PING_INTERVAL_MS = 15_000;

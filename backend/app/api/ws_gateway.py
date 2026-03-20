@@ -1,12 +1,14 @@
 import json
 import os
 import logging
+from time import perf_counter
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.config import settings
 from app.core.fsm import FSMState, SessionContext, StateManager
 from app.llm.deepseek_client import LLMConfigurationError, LLMProviderError, stream_operator_response
 from app.models.pacts import InquisitorReport, StatelessPactModel, ToolCallIntent
@@ -31,6 +33,12 @@ from app.persistence.sqlite_layer import (
     save_pact,
     update_pact_status,
 )
+from app.observability import (
+    estimate_tokens,
+    record_error,
+    record_stage_latency,
+    record_tokens,
+)
 from app.rag.pipeline import build_rag_context
 from app.rag.retrieval import retrieve_relevant_chunks
 from app.rag.shadowing import has_dangerous_command
@@ -47,18 +55,43 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     logger.info("WebSocket conectado: %s", session_id)
     try:
         while True:
-            raw = await websocket.receive_text()
-            message = json.loads(raw)
-            msg_type = message.get("type")
+            message_start = perf_counter()
+            msg_type = "UNKNOWN"
+            ws_status = "ok"
+            try:
+                raw = await websocket.receive_text()
+                message = json.loads(raw)
+                msg_type = str(message.get("type", "UNKNOWN"))
 
-            if msg_type == "INTENT_SUBMIT":
-                await handle_intent(websocket, manager, message)
-            elif msg_type == "PACT_RESOLVE":
-                await handle_pact_resolve(websocket, manager, message)
-            elif msg_type == "PING":
-                await websocket.send_text(json.dumps({"type": "PONG"}))
-            else:
-                logger.warning("Tipo de mensagem desconhecido: %s", msg_type)
+                if msg_type == "INTENT_SUBMIT":
+                    await handle_intent(websocket, manager, message)
+                elif msg_type == "PACT_RESOLVE":
+                    await handle_pact_resolve(websocket, manager, message)
+                elif msg_type == "PING":
+                    await websocket.send_text(json.dumps({"type": "PONG"}))
+                else:
+                    logger.warning("Tipo de mensagem desconhecido: %s", msg_type)
+            except json.JSONDecodeError:
+                ws_status = "invalid_json"
+                record_error("WS_INVALID_JSON", "WS", session_id=session_id)
+                await send_event(
+                    websocket,
+                    StreamTokenEvent(payload=StreamTokenPayload(delta="Payload JSON inválido.")),
+                )
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                ws_status = "error"
+                record_error("WS_HANDLER_ERROR", "WS", session_id=session_id, message_type=msg_type)
+                raise
+            finally:
+                record_stage_latency(
+                    "WS",
+                    (perf_counter() - message_start) * 1000.0,
+                    status=ws_status,
+                    session_id=session_id,
+                    message_type=msg_type,
+                )
     except WebSocketDisconnect:
         logger.info("WebSocket desconectado: %s", session_id)
 
@@ -117,6 +150,16 @@ async def _execute_llm_stream(
     chunks_xml: str,
     pact_id: str | None = None,
 ) -> None:
+    llm_start = perf_counter()
+    llm_status = "ok"
+    input_tokens = estimate_tokens(query) + estimate_tokens(constitution) + estimate_tokens(chunks_xml)
+    record_tokens(
+        "input",
+        input_tokens,
+        stage="LLM",
+        model=settings.default_operator_model,
+        session_id=manager.ctx.session_id,
+    )
     tokens: list[str] = []
     try:
         async for delta in stream_operator_response(
@@ -127,6 +170,8 @@ async def _execute_llm_stream(
             tokens.append(delta)
             await send_event(ws, StreamTokenEvent(payload=StreamTokenPayload(delta=delta)))
     except LLMConfigurationError as exc:
+        llm_status = "auth_error"
+        record_error("LLM_AUTH", "LLM", session_id=manager.ctx.session_id, detail=str(exc))
         manager.transition(FSMState.ERROR)
         await send_event(
             ws,
@@ -144,8 +189,23 @@ async def _execute_llm_stream(
                 {"reason": "LLM_CONFIGURATION_ERROR", "detail": str(exc)},
             )
         manager.transition(FSMState.IDLE)
+        record_stage_latency(
+            "LLM",
+            (perf_counter() - llm_start) * 1000.0,
+            status=llm_status,
+            session_id=manager.ctx.session_id,
+            pact_id=pact_id,
+            model=settings.default_operator_model,
+        )
         return
     except LLMProviderError as exc:
+        exc_str = str(exc).lower()
+        if "timeout" in exc_str:
+            llm_status = "provider_timeout"
+            record_error("LLM_PROVIDER_TIMEOUT", "LLM", session_id=manager.ctx.session_id, detail=str(exc))
+        else:
+            llm_status = "provider_error"
+            record_error("LLM_PROVIDER_ERROR", "LLM", session_id=manager.ctx.session_id, detail=str(exc))
         manager.transition(FSMState.ERROR)
         await send_event(
             ws,
@@ -163,8 +223,18 @@ async def _execute_llm_stream(
                 {"reason": "LLM_PROVIDER_ERROR", "detail": str(exc)},
             )
         manager.transition(FSMState.IDLE)
+        record_stage_latency(
+            "LLM",
+            (perf_counter() - llm_start) * 1000.0,
+            status=llm_status,
+            session_id=manager.ctx.session_id,
+            pact_id=pact_id,
+            model=settings.default_operator_model,
+        )
         return
     except Exception as exc:
+        llm_status = "unexpected_error"
+        record_error("LLM_UNEXPECTED", "LLM", session_id=manager.ctx.session_id, detail=str(exc))
         logger.exception("Erro inesperado no streaming LLM: %s", exc)
         manager.transition(FSMState.ERROR)
         await send_event(
@@ -183,9 +253,25 @@ async def _execute_llm_stream(
                 {"reason": "UNEXPECTED_ERROR", "detail": str(exc)},
             )
         manager.transition(FSMState.IDLE)
+        record_stage_latency(
+            "LLM",
+            (perf_counter() - llm_start) * 1000.0,
+            status=llm_status,
+            session_id=manager.ctx.session_id,
+            pact_id=pact_id,
+            model=settings.default_operator_model,
+        )
         return
 
     final_text = "".join(tokens).strip() or "[sem conteúdo retornado pelo modelo]"
+    output_tokens = estimate_tokens(final_text)
+    record_tokens(
+        "output",
+        output_tokens,
+        stage="LLM",
+        model=settings.default_operator_model,
+        session_id=manager.ctx.session_id,
+    )
     if pact_id:
         await record_pact_audit_event(
             pact_id,
@@ -203,6 +289,14 @@ async def _execute_llm_stream(
     )
     manager.transition(FSMState.MEMORY_CONSOLIDATION)
     manager.transition(FSMState.IDLE)
+    record_stage_latency(
+        "LLM",
+        (perf_counter() - llm_start) * 1000.0,
+        status=llm_status,
+        session_id=manager.ctx.session_id,
+        pact_id=pact_id,
+        model=settings.default_operator_model,
+    )
 
 
 def _collect_manual_chunks(message: dict[str, Any]) -> list[dict[str, str]]:
@@ -241,34 +335,38 @@ async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> 
     domains = message.get("domains", ["generic"])
     if not isinstance(domains, list) or not domains:
         domains = ["generic"]
-    raw_chunks = retrieve_relevant_chunks(
-        query=query,
-        domains=[str(d) for d in domains],
-        manual_chunks=manual_chunks,
-        obsidian_note_paths=[str(p) for p in note_paths] if isinstance(note_paths, list) else None,
-    )
-
-    manager.transition(FSMState.PERCEPTION_ROUTING)
-    manager.transition(FSMState.RAG_RETRIEVAL)
-    await send_event(
-        ws,
-        StateRAGRetrievalEvent(
-            payload=StateRAGRetrievalPayload(
-                documents_scanned=len(raw_chunks),
-                collections=sorted(
-                    {
-                        str(chunk.get("source", "unknown"))
-                        for chunk in raw_chunks
-                        if isinstance(chunk, dict)
-                    }
-                ),
-            )
-        ),
-    )
-
+    rag_start = perf_counter()
+    rag_status = "ok"
     try:
+        raw_chunks = retrieve_relevant_chunks(
+            query=query,
+            domains=[str(d) for d in domains],
+            manual_chunks=manual_chunks,
+            obsidian_note_paths=[str(p) for p in note_paths] if isinstance(note_paths, list) else None,
+        )
+
+        manager.transition(FSMState.PERCEPTION_ROUTING)
+        manager.transition(FSMState.RAG_RETRIEVAL)
+        await send_event(
+            ws,
+            StateRAGRetrievalEvent(
+                payload=StateRAGRetrievalPayload(
+                    documents_scanned=len(raw_chunks),
+                    collections=sorted(
+                        {
+                            str(chunk.get("source", "unknown"))
+                            for chunk in raw_chunks
+                            if isinstance(chunk, dict)
+                        }
+                    ),
+                )
+            ),
+        )
+
         rag_ctx = build_rag_context(query=query, raw_chunks=raw_chunks, domains=[str(d) for d in domains])
     except Exception as exc:
+        rag_status = "error"
+        record_error("RAG_PIPELINE_ERROR", "RAG", session_id=manager.ctx.session_id, detail=str(exc))
         logger.exception("Falha no pipeline RAG para sessão %s: %s", manager.ctx.session_id, exc)
         manager.transition(FSMState.ERROR)
         await send_event(
@@ -276,9 +374,22 @@ async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> 
             StreamTokenEvent(payload=StreamTokenPayload(delta="Erro ao processar intenção. Estado movido para ERROR.")),
         )
         manager.transition(FSMState.IDLE)
+        record_stage_latency(
+            "RAG",
+            (perf_counter() - rag_start) * 1000.0,
+            status=rag_status,
+            session_id=manager.ctx.session_id,
+        )
         return
 
     if rag_ctx.prompt_bloat:
+        rag_status = "prompt_bloat"
+        record_error(
+            "PROMPT_BLOAT",
+            "RAG",
+            session_id=manager.ctx.session_id,
+            detail=str(rag_ctx.prompt_bloat),
+        )
         manager.transition(FSMState.PROMPT_BLOATING)
         await send_event(
             ws,
@@ -291,7 +402,24 @@ async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> 
             ),
         )
         manager.transition(FSMState.IDLE)
+        record_stage_latency(
+            "RAG",
+            (perf_counter() - rag_start) * 1000.0,
+            status=rag_status,
+            session_id=manager.ctx.session_id,
+            domains=domains,
+            chunks=len(raw_chunks),
+        )
         return
+
+    record_stage_latency(
+        "RAG",
+        (perf_counter() - rag_start) * 1000.0,
+        status=rag_status,
+        session_id=manager.ctx.session_id,
+        domains=domains,
+        chunks=len(raw_chunks),
+    )
 
     manager.transition(FSMState.INTERNAL_ITERATION)
     risk_reports = _build_risk_reports(query=query, shadowed_count=rag_ctx.shadowed_count)

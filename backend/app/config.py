@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
+    llm_retry_max_attempts: int = 3
+    llm_retry_base_backoff_seconds: float = 1.0
+    llm_retry_max_backoff_seconds: float = 8.0
 
     honcho_api_url: str = "https://demo.honcho.dev"
     honcho_app_id: str = ""

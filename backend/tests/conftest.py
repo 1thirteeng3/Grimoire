@@ -7,16 +7,19 @@ from httpx import ASGITransport, AsyncClient
 @pytest.fixture
 def isolated_settings(tmp_path: Path):
     from app.config import settings
+    from app.observability import reset_telemetry
 
     original = {
         "data_path": settings.data_path,
         "vault_path": settings.vault_path,
         "entities_path": settings.entities_path,
     }
+    reset_telemetry()
     settings.data_path = tmp_path / "data"
     settings.vault_path = tmp_path / "vault"
     settings.entities_path = tmp_path / "entities"
     yield settings
+    reset_telemetry()
     for key, value in original.items():
         setattr(settings, key, value)
 

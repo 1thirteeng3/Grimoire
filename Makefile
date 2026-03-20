@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap-agent sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov frontend-verify verify lint check-env
+.PHONY: setup bootstrap-agent sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env
 
 setup:
 	$(MAKE) bootstrap-agent
@@ -43,6 +43,9 @@ test: sync-backend
 
 backend-test-cov: sync-backend
 	cd backend && PYTHONPATH=. python3 -m uv run pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=80
+
+backend-e2e: sync-backend
+	cd backend && PYTHONPATH=. python3 -m uv run pytest tests/e2e -v
 
 frontend-verify: sync-frontend
 	cd frontend && npm run generate-types && npm run typecheck && npm run build

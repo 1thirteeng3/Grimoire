@@ -20,6 +20,11 @@ class Settings(BaseSettings):
 
     qdrant_mode: str = "path"
     qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "grimoire_notes"
+    qdrant_local_path: Path = Path("./data/qdrant")
+    embedding_model_id: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    retrieval_top_k: int = 20
+    retrieval_min_score: float = 0.15
 
     obsidian_cli_binary: str = "obsidian"
     obsidian_cli_timeout_seconds: int = 15

@@ -9,6 +9,7 @@ from app.api.ws_gateway import router as ws_router
 from app.config import settings
 from app.core.entity_loader import load_and_validate_entities
 from app.persistence.sqlite_layer import check_sqlite_runtime_support, init_db
+from app.rag.ingestion import index_obsidian_vault
 from app.rag.jit_prompting import DogmasWatcher
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
     app.state.dogmas_watcher = watcher
     watcher.start()
     logger.info("Dogmas Watcher iniciado")
+
+    indexed_docs = index_obsidian_vault()
+    logger.info("RAG index inicial: %s documento(s) Obsidian.", indexed_docs)
 
     yield
 

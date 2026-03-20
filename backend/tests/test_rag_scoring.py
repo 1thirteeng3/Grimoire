@@ -113,3 +113,14 @@ def test_multiclass_logits_use_first_column(mock_ort_model):
     )
     results = score_and_rank("q", chunks, top_k=2)
     assert [r.raw_logit for r in results] == [1.4, 0.2]
+
+
+def test_scoring_fallback_when_onnx_unavailable(monkeypatch):
+    monkeypatch.setattr("app.rag.scoring._load_model", lambda: (_ for _ in ()).throw(RuntimeError("missing")))
+    chunks = [
+        {"text": "usar porta 443 com tls", "source": "a", "memory_type": "critical_dogma"},
+        {"text": "redis cache local", "source": "b", "memory_type": "vector_rag"},
+    ]
+    results = score_and_rank("porta 443 tls", chunks, top_k=2)
+    assert len(results) == 2
+    assert results[0].source == "a"

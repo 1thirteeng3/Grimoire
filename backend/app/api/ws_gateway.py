@@ -7,9 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.config import settings
 from app.core.fsm import FSMState, SessionContext, StateManager
-from app.integrations.obsidian_cli import ObsidianCliError, read_note
 from app.llm.deepseek_client import LLMConfigurationError, LLMProviderError, stream_operator_response
 from app.models.pacts import InquisitorReport, StatelessPactModel, ToolCallIntent
 from app.models.websocket import (
@@ -34,6 +32,7 @@ from app.persistence.sqlite_layer import (
     update_pact_status,
 )
 from app.rag.pipeline import build_rag_context
+from app.rag.retrieval import retrieve_relevant_chunks
 from app.rag.shadowing import has_dangerous_command
 
 router = APIRouter()
@@ -206,7 +205,7 @@ async def _execute_llm_stream(
     manager.transition(FSMState.IDLE)
 
 
-def _collect_chunks(message: dict[str, Any]) -> list[dict[str, str]]:
+def _collect_manual_chunks(message: dict[str, Any]) -> list[dict[str, str]]:
     raw_chunks = message.get("chunks", [])
     chunks: list[dict[str, str]] = []
     if isinstance(raw_chunks, list):
@@ -221,24 +220,7 @@ def _collect_chunks(message: dict[str, Any]) -> list[dict[str, str]]:
                     "text": text,
                     "source": str(chunk.get("source", "unknown")),
                     "memory_type": str(chunk.get("memory_type", "vector_rag")),
-                }
-            )
-
-    note_paths = message.get("obsidian_note_paths", [])
-    if isinstance(note_paths, list):
-        for note_path in note_paths:
-            if not isinstance(note_path, str) or not note_path.strip():
-                continue
-            try:
-                note_content = read_note(note_path)
-            except ObsidianCliError as exc:
-                logger.warning("Falha ao ler nota Obsidian '%s': %s", note_path, exc)
-                continue
-            chunks.append(
-                {
-                    "text": note_content[: settings.obsidian_note_max_chars],
-                    "source": f"obsidian:{note_path}",
-                    "memory_type": "obsidian_vault",
+                    "domain": str(chunk.get("domain", "generic")),
                 }
             )
     return chunks
@@ -252,10 +234,19 @@ async def handle_intent(ws: WebSocket, manager: StateManager, message: dict) -> 
             StreamTokenEvent(payload=StreamTokenPayload(delta="INTENT_SUBMIT sem query textual.")),
         )
         return
-    raw_chunks = _collect_chunks(message)
+    manual_chunks = _collect_manual_chunks(message)
+    note_paths = message.get("obsidian_note_paths")
+    if note_paths is not None and not isinstance(note_paths, list):
+        note_paths = None
     domains = message.get("domains", ["generic"])
     if not isinstance(domains, list) or not domains:
         domains = ["generic"]
+    raw_chunks = retrieve_relevant_chunks(
+        query=query,
+        domains=[str(d) for d in domains],
+        manual_chunks=manual_chunks,
+        obsidian_note_paths=[str(p) for p in note_paths] if isinstance(note_paths, list) else None,
+    )
 
     manager.transition(FSMState.PERCEPTION_ROUTING)
     manager.transition(FSMState.RAG_RETRIEVAL)

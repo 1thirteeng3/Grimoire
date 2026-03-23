@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs backup-db restore-db retention-run
+.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs backup-db restore-db retention-run db-migrate db-rollback deploy-validate release-staging release-production rollback-deploy
 
 setup:
 	$(MAKE) bootstrap-agent
@@ -80,3 +80,23 @@ restore-db: sync-backend
 
 retention-run: sync-backend
 	cd backend && PYTHONPATH=. python3 -m uv run python3 -c "import asyncio; from app.persistence.maintenance import run_retention_cycle; print(asyncio.run(run_retention_cycle()))"
+
+db-migrate: sync-backend
+	python3 scripts/migrate_db.py
+
+db-rollback: sync-backend
+	python3 scripts/rollback_db.py --steps $(or $(STEPS),1)
+
+deploy-validate:
+	python3 ops/deploy/deployctl.py validate-env-mirror
+
+release-staging:
+	@test -n "$(VERSION)" || (echo "Use: make release-staging VERSION=vX.Y.Z [STRATEGY=blue-green|canary] [CANARY_WEIGHT=10] [PROMOTE=1]"; exit 1)
+	python3 ops/deploy/deployctl.py release --env staging --version "$(VERSION)" --strategy "$(or $(STRATEGY),blue-green)" --canary-weight "$(or $(CANARY_WEIGHT),10)" $(if $(PROMOTE),--promote,)
+
+release-production:
+	@test -n "$(VERSION)" || (echo "Use: make release-production VERSION=vX.Y.Z [STRATEGY=blue-green|canary] [CANARY_WEIGHT=10] [PROMOTE=1]"; exit 1)
+	python3 ops/deploy/deployctl.py release --env production --version "$(VERSION)" --strategy "$(or $(STRATEGY),blue-green)" --canary-weight "$(or $(CANARY_WEIGHT),10)" $(if $(PROMOTE),--promote,)
+
+rollback-deploy:
+	python3 ops/deploy/deployctl.py rollback --env "$(or $(ENV),production)" --strategy "$(or $(STRATEGY),auto)" $(if $(TO_VERSION),--to-version "$(TO_VERSION)",)

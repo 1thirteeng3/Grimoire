@@ -121,6 +121,64 @@ Manual run:
 
 - `make retention-run`
 
+### Schema versioning and safe migration rollback
+
+- Migration files live in `backend/app/persistence/migrations/sql`:
+  - `NNNN_name.up.sql`
+  - `NNNN_name.down.sql`
+- Startup applies pending migrations automatically via persistence init.
+- Manual commands:
+  - `make db-migrate`
+  - `make db-rollback STEPS=1`
+  - `python3 scripts/migrate_db.py --target-version 0001_initial`
+  - `python3 scripts/rollback_db.py --steps 1`
+
+Migration discovery enforces that each `up` has a matching `down` file, preventing
+non-reversible schema changes from entering the main flow.
+
+## Deploy and rollback strategy
+
+Release control lives in `ops/deploy/deployctl.py` with support for:
+
+- `blue-green` (switch active slot after healthcheck)
+- `canary` (keep stable slot + optional promotion)
+- rollback modes:
+  - `auto` (prefer canary rollback if canary is active, otherwise blue/green)
+  - explicit `canary` or `blue-green`
+
+### Mirrored staging environment
+
+Environment config keys are mirrored and validated between:
+
+- `ops/deploy/environments/staging.env`
+- `ops/deploy/environments/production.env`
+
+Validation command:
+
+- `make deploy-validate`
+
+### Local operational commands
+
+- `make release-staging VERSION=v1.2.3 STRATEGY=blue-green`
+- `make release-production VERSION=v1.2.3 STRATEGY=canary CANARY_WEIGHT=10`
+- `make rollback-deploy ENV=production STRATEGY=auto`
+
+Inspect deployment state:
+
+- `python3 ops/deploy/deployctl.py print-state --env staging`
+- `python3 ops/deploy/deployctl.py print-state --env production`
+
+### GitHub release pipeline
+
+Workflow: `.github/workflows/release.yml`
+
+- validates staging/production mirror configuration
+- runs full verification before release
+- generates release manifest artifact
+- deploys to staging (mirrored path)
+- promotes to production (configurable in `workflow_dispatch`)
+- supports manual rollback execution from workflow inputs
+
 ## Security access controls
 
 Backend supports real auth/authz for REST + WS, rate limiting, and secret vault rotation.

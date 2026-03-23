@@ -5,57 +5,11 @@ from typing import Any
 from uuid import uuid4
 
 import asyncpg
+from app.persistence.migrations import apply_migrations_postgres, rollback_migrations_postgres
 
 logger = logging.getLogger("grimoire.postgres")
 
 _pool: asyncpg.Pool | None = None
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS pending_pacts (
-    pact_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    entity_manifest_hash TEXT NOT NULL,
-    fsm_status TEXT NOT NULL DEFAULT 'PENDING_HUMAN_CONFLICT',
-    operator_proposal_raw TEXT NOT NULL,
-    tool_intent_json TEXT NOT NULL,
-    critic_report_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    ttl_timestamp TEXT NOT NULL,
-    cryptographic_signature TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS session_summaries (
-    summary_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    summary_text TEXT NOT NULL,
-    domain TEXT
-);
-
-CREATE TABLE IF NOT EXISTS routing_events (
-    event_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    feedback_score DOUBLE PRECISION NOT NULL,
-    edit_delta DOUBLE PRECISION,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS pact_audit_events (
-    event_id TEXT PRIMARY KEY,
-    pact_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    detail_json TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_pacts_ttl ON pending_pacts(ttl_timestamp);
-CREATE INDEX IF NOT EXISTS idx_pacts_session ON pending_pacts(session_id);
-CREATE INDEX IF NOT EXISTS idx_pact_audit_pact ON pact_audit_events(pact_id);
-CREATE INDEX IF NOT EXISTS idx_pact_audit_session ON pact_audit_events(session_id);
-"""
 
 
 def _ensure_pool() -> asyncpg.Pool:
@@ -69,9 +23,24 @@ async def init_db(dsn: str) -> None:
     if not dsn.strip():
         raise RuntimeError("GRIMOIRE_POSTGRES_DSN vazio para backend postgres.")
     _pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=10)
-    async with _pool.acquire() as conn:
-        await conn.execute(SCHEMA)
-    logger.info("Schema Postgres inicializado")
+    applied = await apply_migrations_postgres(_pool)
+    logger.info("Postgres inicializado (migrations aplicadas=%s)", len(applied))
+
+
+async def migrate(target_version: str | None = None) -> list[str]:
+    pool = _ensure_pool()
+    applied = await apply_migrations_postgres(pool, target_version=target_version)
+    if applied:
+        logger.info("Postgres migrations aplicadas: %s", applied)
+    return applied
+
+
+async def rollback_migrations(steps: int = 1) -> list[str]:
+    pool = _ensure_pool()
+    reverted = await rollback_migrations_postgres(pool, steps=steps)
+    if reverted:
+        logger.warning("Postgres rollback aplicado: %s", reverted)
+    return reverted
 
 
 async def close_db() -> None:

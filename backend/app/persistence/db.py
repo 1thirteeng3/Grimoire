@@ -29,6 +29,16 @@ async def close_db() -> None:
         await postgres_layer.close_db()
 
 
+async def migrate(target_version: str | None = None) -> list[str]:
+    fn = _op(sqlite_layer.migrate, postgres_layer.migrate)
+    return list(await fn(target_version=target_version))
+
+
+async def rollback_migrations(steps: int = 1) -> list[str]:
+    fn = _op(sqlite_layer.rollback_migrations, postgres_layer.rollback_migrations)
+    return list(await fn(steps=steps))
+
+
 def _op(sqlite_fn: _DBFn, postgres_fn: _DBFn) -> _DBFn:
     return postgres_fn if _use_postgres() else sqlite_fn
 

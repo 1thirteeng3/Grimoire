@@ -1,16 +1,19 @@
-.PHONY: setup bootstrap-agent sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env
+.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env
 
 setup:
 	$(MAKE) bootstrap-agent
 
 bootstrap-agent:
-	python3 -m pip install --upgrade pip uv
+	$(MAKE) ensure-uv
 	$(MAKE) sync-backend
 	$(MAKE) sync-frontend
 	$(MAKE) generate-types
 	@echo "✓ Ambiente pronto para backend+frontend"
 
-sync-backend:
+ensure-uv:
+	@python3 -m uv --version >/dev/null 2>&1 || (python3 -m pip install --upgrade pip uv && python3 -m uv --version)
+
+sync-backend: ensure-uv
 	if [ -f backend/uv.lock ]; then cd backend && python3 -m uv sync --extra dev --frozen; else cd backend && python3 -m uv sync --extra dev; fi
 
 sync-frontend:

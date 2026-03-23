@@ -9,23 +9,37 @@ devcontainer-based runs.
 
 - Python **3.11** base image via `.devcontainer/devcontainer.json`
 - Node.js **20** via Dev Container feature and `.nvmrc`
-- `uv` install + backend sync (`uv sync --extra dev`)
+- `uv` auto-ensure + backend sync (`uv sync --extra dev`)
 - Frontend dependency install (`npm ci` when lockfile exists)
-- REST and WebSocket type generation on startup (`make generate-types`)
+- REST and WebSocket schema/type generation on create/update (`make export-schema`, `make export-ws-schema`, frontend `generate-types`)
+- Startup guard (`.devcontainer/post-start.sh`) that repairs missing `.venv`, `node_modules`, or schema files automatically
 
 ### Files
 
 - `.devcontainer/devcontainer.json` — base image + features + bootstrap hook
-- `.devcontainer/post-create.sh` — one-shot bootstrap for backend/frontend
-- `Makefile` — `bootstrap-agent`, `backend-test-cov`, `frontend-verify`, `verify`
+- `.devcontainer/post-create.sh` — pre-installs backend/frontend deps and generates schemas/types
+- `.devcontainer/post-start.sh` — lightweight self-healing checks on container start
+- `Makefile` — `ensure-uv`, `sync-backend`, `backend-test-cov`, `backend-e2e`, `frontend-verify`, `verify`
 - `backend/.python-version` — Python runtime pin for local tooling
 
 ### Fast commands
 
-- `make bootstrap-agent` — install tooling and dependencies + generate types
+- `make bootstrap-agent` — explicit full bootstrap (optional)
+- `make sync-backend` — backend deps (auto-installs uv if missing)
 - `make backend-test-cov` — backend tests with coverage gate (>=80%)
+- `make backend-e2e` — backend E2E suite
 - `make frontend-verify` — generate-types + typecheck + build
 - `make verify` — backend + frontend verification pipeline
+
+### Cloud agent expectation
+
+After container creation (or content update), agents can run:
+
+- `make backend-test-cov`
+- `make backend-e2e`
+- `make frontend-verify`
+
+without any manual bootstrap step.
 
 ### Frontend build behavior
 

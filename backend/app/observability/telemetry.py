@@ -2,7 +2,7 @@ import json
 import logging
 import threading
 from collections import defaultdict
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
 
 logger = logging.getLogger("grimoire.observability")
@@ -17,6 +17,7 @@ _requests_total: int = 0
 
 _encoder = None
 _tiktoken_available = True
+_last_mutation_ts: float | None = None
 
 
 def _structured_log(event: str, **fields: Any) -> None:
@@ -37,7 +38,7 @@ def elapsed_ms(start: float) -> float:
 
 
 def record_stage_latency(stage: str, duration_ms: float, status: str = "ok", **context: Any) -> None:
-    global _requests_total
+    global _requests_total, _last_mutation_ts
     with _lock:
         stats = _stage_stats[stage]
         stats["count"] = int(stats["count"]) + 1
@@ -47,6 +48,7 @@ def record_stage_latency(stage: str, duration_ms: float, status: str = "ok", **c
             stats["errors"] = int(stats["errors"]) + 1
         if stage == "WS":
             _requests_total += 1
+        _last_mutation_ts = monotonic()
     _structured_log(
         "stage_latency",
         stage=stage,
@@ -57,18 +59,22 @@ def record_stage_latency(stage: str, duration_ms: float, status: str = "ok", **c
 
 
 def record_tokens(direction: str, count: int, **context: Any) -> None:
+    global _last_mutation_ts
     safe_count = max(0, int(count))
     with _lock:
         _token_stats[direction] += safe_count
+        _last_mutation_ts = monotonic()
     _structured_log("token_usage", direction=direction, count=safe_count, **context)
 
 
 def record_error(error_type: str, stage: str, **context: Any) -> None:
+    global _last_mutation_ts
     key = f"{stage}:{error_type}"
     with _lock:
         _error_stats[key] += 1
         total = max(1, _requests_total)
         current_rate = _error_stats[key] / total
+        _last_mutation_ts = monotonic()
     _structured_log(
         "error_counter",
         stage=stage,
@@ -195,9 +201,27 @@ def telemetry_prometheus() -> str:
 
 
 def reset_telemetry() -> None:
-    global _requests_total
+    global _requests_total, _last_mutation_ts
     with _lock:
         _stage_stats.clear()
         _token_stats.clear()
         _error_stats.clear()
         _requests_total = 0
+        _last_mutation_ts = monotonic()
+
+
+def enforce_metrics_retention(retention_seconds: int) -> bool:
+    global _requests_total, _last_mutation_ts
+    if retention_seconds <= 0:
+        return False
+    with _lock:
+        if _last_mutation_ts is None:
+            return False
+        if (monotonic() - _last_mutation_ts) < float(retention_seconds):
+            return False
+        _stage_stats.clear()
+        _token_stats.clear()
+        _error_stats.clear()
+        _requests_total = 0
+        _last_mutation_ts = monotonic()
+        return True

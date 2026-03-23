@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.models.pacts import StatelessPactModel, ToolCallIntent
-from app.persistence.sqlite_layer import (
+from app.persistence.db import (
     fetch_pact,
     fetch_pact_any_status,
     fetch_pact_audit_events,

@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs
+.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs backup-db restore-db retention-run
 
 setup:
 	$(MAKE) bootstrap-agent
@@ -70,3 +70,13 @@ monitoring-down:
 
 monitoring-logs:
 	docker compose -f ops/monitoring/docker-compose.monitoring.yml logs -f --tail=200
+
+backup-db: sync-backend
+	python3 scripts/backup_db.py
+
+restore-db: sync-backend
+	@test -n "$(BACKUP_FILE)" || (echo "Use: make restore-db BACKUP_FILE=/path/backup"; exit 1)
+	python3 scripts/restore_db.py --input "$(BACKUP_FILE)"
+
+retention-run: sync-backend
+	cd backend && PYTHONPATH=. python3 -m uv run python3 -c "import asyncio; from app.persistence.maintenance import run_retention_cycle; print(asyncio.run(run_retention_cycle()))"

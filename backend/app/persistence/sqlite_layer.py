@@ -208,3 +208,93 @@ async def fetch_pact_audit_events(pact_id: str) -> list[dict[str, Any]]:
         event["detail_json"] = json.loads(event.get("detail_json") or "{}")
         events.append(event)
     return events
+
+
+async def purge_old_audit_events(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM pact_audit_events
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING event_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM pact_audit_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM pact_audit_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)
+
+
+async def purge_old_routing_events(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM routing_events
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING event_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM routing_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM routing_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)
+
+
+async def purge_old_session_summaries(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM session_summaries
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING summary_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM session_summaries WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM session_summaries WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)

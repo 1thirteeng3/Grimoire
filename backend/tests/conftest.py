@@ -12,14 +12,22 @@ def isolated_settings(tmp_path: Path):
 
     original = {
         "data_path": settings.data_path,
+        "backup_path": settings.backup_path,
         "vault_path": settings.vault_path,
         "entities_path": settings.entities_path,
+        "persistence_backend": settings.persistence_backend,
+        "postgres_dsn": settings.postgres_dsn,
+        "enable_file_logging": settings.enable_file_logging,
     }
     reset_telemetry()
     reset_rate_limiters()
     settings.data_path = tmp_path / "data"
+    settings.backup_path = tmp_path / "backups"
     settings.vault_path = tmp_path / "vault"
     settings.entities_path = tmp_path / "entities"
+    settings.persistence_backend = "sqlite"
+    settings.postgres_dsn = ""
+    settings.enable_file_logging = False
     yield settings
     reset_telemetry()
     reset_rate_limiters()

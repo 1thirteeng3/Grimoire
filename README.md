@@ -77,7 +77,49 @@ without any manual bootstrap step.
   - `APPROVE_AS_IS`: executes stored proposal
   - `MODIFY_AND_APPROVE`: executes overridden arguments and marks pact as `FORCED`
   - `ABORT`: cancels execution
-- Full audit trail is persisted in SQLite table `pact_audit_events`.
+- Full audit trail is persisted in table `pact_audit_events` (SQLite or Postgres,
+  according to backend setting).
+
+## Persistence and scale (SQLite -> Postgres, backup/restore, retention)
+
+### Backend selection
+
+- `GRIMOIRE_PERSISTENCE_BACKEND=sqlite` (default) keeps local file persistence.
+- `GRIMOIRE_PERSISTENCE_BACKEND=postgres` enables Postgres pool + schema init.
+- For Postgres mode set `GRIMOIRE_POSTGRES_DSN` (e.g.
+  `postgresql://user:pass@host:5432/grimoire`).
+
+SQLite remains simpler for local/offline; Postgres is recommended for higher
+concurrency, replicas/HA setups, and centralized backup operations.
+
+### Backup and restore strategy (tested)
+
+- `make backup-db` creates a backup using configured backend:
+  - SQLite: copy of `data/grimoire.db` into `data/backups/*.db`
+  - Postgres: `pg_dump --format=custom` into `data/backups/*.dump`
+- `make restore-db BACKUP_FILE=/abs/path/file` restores backup:
+  - SQLite: copies backup back to `data/grimoire.db`
+  - Postgres: `pg_restore --clean --if-exists`
+
+Equivalent scripts:
+
+- `python3 scripts/backup_db.py`
+- `python3 scripts/restore_db.py --input /abs/path/file`
+
+### Retention policy
+
+Retention is enforced by a periodic maintenance job (default each hour).
+
+- `GRIMOIRE_RETENTION_AUDIT_DAYS` (default 90)
+- `GRIMOIRE_RETENTION_ROUTING_DAYS` (default 30)
+- `GRIMOIRE_RETENTION_SESSION_SUMMARY_DAYS` (default 30)
+- `GRIMOIRE_RETENTION_MAINTENANCE_INTERVAL_SECONDS` (default 3600)
+- `GRIMOIRE_METRICS_RETENTION_SECONDS` (default 86400, in-memory counters reset
+  after inactivity window)
+
+Manual run:
+
+- `make retention-run`
 
 ## Security access controls
 
@@ -124,6 +166,11 @@ Quick commands:
 - `make monitoring-up` — start Prometheus + Alertmanager
 - `make monitoring-logs` — tail monitoring logs
 - `make monitoring-down` — stop monitoring stack
+
+Prometheus retention defaults in compose:
+
+- `--storage.tsdb.retention.time=15d`
+- `--storage.tsdb.retention.size=2GB`
 
 Configured alert rules:
 

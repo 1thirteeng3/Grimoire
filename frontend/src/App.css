@@ -1,35 +1,74 @@
+:root {
+  --bg: #f4f7fb;
+  --bg-gradient: radial-gradient(circle at 12% 15%, #dbeafe 0, transparent 45%),
+    radial-gradient(circle at 88% 8%, #e9d5ff 0, transparent 38%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  --text: #0f172a;
+  --muted: #64748b;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --card-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --chip-bg: #e2e8f0;
+  --chip-border: #cbd5e1;
+  --table-row: #f8fafc;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  background-image: var(--bg-gradient);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
 .app-shell {
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   margin: 0 auto;
-  max-width: 1100px;
-  padding: 24px;
-  color: #111827;
+  max-width: 1140px;
+  padding: 28px 20px 32px;
 }
 
 .app-header {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .app-header h1 {
-  margin: 0 0 8px 0;
+  margin: 0 0 8px;
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+  letter-spacing: 0.2px;
 }
 
 .status-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 10px;
   margin-bottom: 20px;
 }
 
 .status-chip {
-  background: #f3f4f6;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--chip-border);
+  background: color-mix(in srgb, var(--chip-bg) 78%, white 22%);
   border-radius: 999px;
   padding: 6px 12px;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1;
 }
 
 .section-title {
   margin: 20px 0 10px;
+  font-size: 1.05rem;
 }
 
 .grid {
@@ -38,37 +77,47 @@
 }
 
 .grid.grid-3 {
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .grid.grid-2 {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 }
 
 .card {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 12px;
-  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 14px 12px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent 10%);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--card-shadow);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
 }
 
 .card h3 {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 15px;
+  color: #1e293b;
 }
 
 .metric-line {
   margin: 4px 0;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .error-text {
   color: #b91c1c;
+  font-weight: 600;
 }
 
 .muted {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .endpoint-links {
@@ -80,6 +129,8 @@
 .endpoint-links a {
   color: #2563eb;
   text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .endpoint-links a:hover {
@@ -88,9 +139,10 @@
 
 .health-chip {
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 3px 8px;
 }
 
 .health-up {
@@ -104,31 +156,71 @@
 }
 
 .health-unknown {
-  background: #e5e7eb;
-  color: #4b5563;
+  background: #e2e8f0;
+  color: #475569;
 }
 
 .error-table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
   margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .error-table th,
 .error-table td {
-  border: 1px solid #e5e7eb;
   text-align: left;
-  padding: 8px;
-  font-size: 13px;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.error-table th {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.error-table tbody tr:nth-child(odd) {
+  background: var(--table-row);
+}
+
+.error-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .stream-preview {
-  border: 1px dashed #d1d5db;
-  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
   margin-top: 12px;
-  padding: 10px;
+  padding: 12px;
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  background: #f9fafb;
+  background: #f8fafc;
+  max-height: 220px;
+  overflow: auto;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 20px 14px 26px;
+  }
+
+  .status-row {
+    gap: 8px;
+  }
+
+  .status-chip {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .error-table th,
+  .error-table td {
+    font-size: 11px;
+    padding: 7px 8px;
+  }
 }

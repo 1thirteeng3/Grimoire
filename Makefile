@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env
+.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs
 
 setup:
 	$(MAKE) bootstrap-agent
@@ -61,3 +61,12 @@ lint: sync-backend sync-frontend
 
 check-env:
 	python3 scripts/setup_env.py
+
+monitoring-up:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml up -d
+
+monitoring-down:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml down
+
+monitoring-logs:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml logs -f --tail=200

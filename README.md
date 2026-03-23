@@ -78,3 +78,32 @@ without any manual bootstrap step.
   - `MODIFY_AND_APPROVE`: executes overridden arguments and marks pact as `FORCED`
   - `ABORT`: cancels execution
 - Full audit trail is persisted in SQLite table `pact_audit_events`.
+
+## Operational alerts (Prometheus + Alertmanager)
+
+Monitoring stack files are under `ops/monitoring`:
+
+- `ops/monitoring/prometheus.yml`
+- `ops/monitoring/alert_rules.yml`
+- `ops/monitoring/alertmanager.yml`
+- `ops/monitoring/docker-compose.monitoring.yml`
+
+Quick commands:
+
+- `make monitoring-up` — start Prometheus + Alertmanager
+- `make monitoring-logs` — tail monitoring logs
+- `make monitoring-down` — stop monitoring stack
+
+Configured alert rules:
+
+- `GrimoireLLMProviderTimeoutHigh`
+  - triggers when `LLM_PROVIDER_TIMEOUT` is above threshold (>=3 in 10 minutes)
+- `GrimoirePromptBloatRecurring`
+  - triggers when `PROMPT_BLOAT` is recurrent (>=5 in 15 minutes)
+- `GrimoireRAGAverageLatencyHigh`
+  - triggers when average RAG latency stays above threshold
+- `GrimoireLLMAverageLatencyHigh`
+  - triggers when average LLM latency stays above threshold
+
+Prometheus scrapes `http://host.docker.internal:8000/metrics` (from inside the
+monitoring containers). Run backend on port `8000` before enabling alerts.

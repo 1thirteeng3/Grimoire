@@ -8,8 +8,16 @@ import { useSystemStore } from "./store/system";
 
 export default function App() {
   const { fsmState, isConnected, confidenceState, activePactId, streamBuffer } = useSystemStore();
-  const { snapshot, isLoading, error, lastUpdatedAt, jsonEndpoint, prometheusEndpoint } =
-    useObservabilityMetrics();
+  const {
+    snapshot,
+    isLoading,
+    error,
+    lastUpdatedAt,
+    prometheusHealth,
+    prometheusLastCheckedAt,
+    jsonEndpoint,
+    prometheusEndpoint
+  } = useObservabilityMetrics();
 
   useWebSocket("frontend_observability_panel");
 
@@ -112,6 +120,18 @@ export default function App() {
 
       <section>
         <h2 className="section-title">Endpoints</h2>
+        <p className="metric-line">
+          Prometheus (opcional):{" "}
+          <span className={`health-chip health-${prometheusHealth}`}>
+            {prometheusHealth.toUpperCase()}
+          </span>
+          {prometheusLastCheckedAt ? (
+            <span className="muted">
+              {" "}
+              (checado {new Date(prometheusLastCheckedAt).toLocaleTimeString()})
+            </span>
+          ) : null}
+        </p>
         <div className="endpoint-links">
           <a href={jsonEndpoint} target="_blank" rel="noreferrer">
             JSON metrics

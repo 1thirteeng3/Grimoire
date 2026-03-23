@@ -15,6 +15,8 @@ export interface ObservabilityMetricsSnapshot {
   error_rates_over_ws: Record<string, number>;
 }
 
+export type EndpointHealth = "unknown" | "up" | "down";
+
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 const POLL_INTERVAL_MS = 2000;
 
@@ -30,6 +32,27 @@ export function useObservabilityMetrics() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [prometheusHealth, setPrometheusHealth] = useState<EndpointHealth>("unknown");
+  const [prometheusLastCheckedAt, setPrometheusLastCheckedAt] = useState<number | null>(null);
+
+  const probePrometheus = useCallback(async () => {
+    try {
+      const response = await fetch(prometheusEndpoint, {
+        headers: {
+          Accept: "text/plain"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const body = await response.text();
+      setPrometheusHealth(body.includes("grimoire_") ? "up" : "down");
+    } catch {
+      setPrometheusHealth("down");
+    } finally {
+      setPrometheusLastCheckedAt(Date.now());
+    }
+  }, [prometheusEndpoint]);
 
   const fetchSnapshot = useCallback(async () => {
     try {
@@ -55,19 +78,23 @@ export function useObservabilityMetrics() {
 
   useEffect(() => {
     void fetchSnapshot();
+    void probePrometheus();
     const interval = setInterval(() => {
       void fetchSnapshot();
+      void probePrometheus();
     }, POLL_INTERVAL_MS);
     return () => {
       clearInterval(interval);
     };
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, probePrometheus]);
 
   return {
     snapshot,
     isLoading,
     error,
     lastUpdatedAt,
+    prometheusHealth,
+    prometheusLastCheckedAt,
     jsonEndpoint,
     prometheusEndpoint
   };

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 def isolated_settings(tmp_path: Path):
     from app.config import settings
     from app.observability import reset_telemetry
+    from app.security import reset_rate_limiters
 
     original = {
         "data_path": settings.data_path,
@@ -15,11 +16,13 @@ def isolated_settings(tmp_path: Path):
         "entities_path": settings.entities_path,
     }
     reset_telemetry()
+    reset_rate_limiters()
     settings.data_path = tmp_path / "data"
     settings.vault_path = tmp_path / "vault"
     settings.entities_path = tmp_path / "entities"
     yield settings
     reset_telemetry()
+    reset_rate_limiters()
     for key, value in original.items():
         setattr(settings, key, value)
 

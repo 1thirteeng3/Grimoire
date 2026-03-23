@@ -79,6 +79,37 @@ without any manual bootstrap step.
   - `ABORT`: cancels execution
 - Full audit trail is persisted in SQLite table `pact_audit_events`.
 
+## Security access controls
+
+Backend supports real auth/authz for REST + WS, rate limiting, and secret vault rotation.
+
+### Authentication / authorization
+
+- Toggle with `GRIMOIRE_AUTH_REQUIRED=true`.
+- Token sources:
+  - keyring/local vault keys `auth_admin_token` and `auth_observer_token`
+  - optional env overrides `GRIMOIRE_AUTH_ADMIN_TOKEN`, `GRIMOIRE_AUTH_OBSERVER_TOKEN`
+- Scope model:
+  - admin: `pacts:read`, `pacts:write`, `observability:read`, `metrics:read`, `ws:connect`, `ws:write`
+  - observer: read-only (`pacts:read`, `observability:read`, `metrics:read`)
+
+WS token can be provided via `Authorization: Bearer ...` or `?token=...` query param.
+
+### Rate limiting / abuse protection
+
+- REST per-IP limit: `GRIMOIRE_REST_RATE_LIMIT_PER_MINUTE` (default 120)
+- WS per-IP limit: `GRIMOIRE_WS_RATE_LIMIT_PER_MINUTE_PER_IP` (default 240)
+- WS per-session limit: `GRIMOIRE_WS_RATE_LIMIT_PER_MINUTE_PER_SESSION` (default 180)
+- WS payload limit: `GRIMOIRE_WS_MAX_MESSAGE_CHARS` (default 20000)
+
+### Secrets vault and periodic rotation
+
+- Pact signing secrets are managed in vault keys:
+  - current: `pact_hmac_secret_current`
+  - previous: `pact_hmac_secret_previous`
+- Rotation period: `GRIMOIRE_PACT_SECRET_ROTATION_SECONDS` (default 30 days)
+- Signature verification accepts current + previous key for safe transition.
+
 ## Operational alerts (Prometheus + Alertmanager)
 
 Monitoring stack files are under `ops/monitoring`:

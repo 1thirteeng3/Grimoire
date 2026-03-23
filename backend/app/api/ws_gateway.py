@@ -1,5 +1,4 @@
 import json
-import os
 import logging
 from time import perf_counter
 from datetime import datetime
@@ -42,6 +41,13 @@ from app.observability import (
 from app.rag.pipeline import build_rag_context
 from app.rag.retrieval import retrieve_relevant_chunks
 from app.rag.shadowing import has_dangerous_command
+from app.security import (
+    authorize_websocket_connect,
+    authorize_ws_message_type,
+    check_ws_limits,
+    get_current_pact_secret,
+    verify_pact_signature,
+)
 
 router = APIRouter()
 logger = logging.getLogger("grimoire.ws")
@@ -49,10 +55,14 @@ logger = logging.getLogger("grimoire.ws")
 
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    principal = await authorize_websocket_connect(websocket)
+    if principal is None:
+        return
     await websocket.accept()
     ctx = SessionContext(session_id=session_id)
     manager = StateManager(ctx)
     logger.info("WebSocket conectado: %s", session_id)
+    client_ip = websocket.client.host if websocket.client and websocket.client.host else "unknown"
     try:
         while True:
             message_start = perf_counter()
@@ -60,8 +70,51 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             ws_status = "ok"
             try:
                 raw = await websocket.receive_text()
+                if len(raw) > settings.ws_max_message_chars:
+                    ws_status = "abuse_payload_size"
+                    record_error("WS_PAYLOAD_TOO_LARGE", "WS", session_id=session_id, client_ip=client_ip)
+                    await send_event(
+                        websocket,
+                        StreamTokenEvent(payload=StreamTokenPayload(delta="Payload excede limite permitido.")),
+                    )
+                    await websocket.close(code=1008, reason="PAYLOAD_TOO_LARGE")
+                    return
+                ok, reason, retry_after = check_ws_limits(client_ip=client_ip, session_id=session_id)
+                if not ok:
+                    ws_status = "rate_limited"
+                    record_error(
+                        reason,
+                        "WS",
+                        session_id=session_id,
+                        client_ip=client_ip,
+                        retry_after=retry_after,
+                    )
+                    await send_event(
+                        websocket,
+                        StreamTokenEvent(
+                            payload=StreamTokenPayload(
+                                delta=f"Rate limit atingido ({reason}). Retry-After: {retry_after}s."
+                            )
+                        ),
+                    )
+                    await websocket.close(code=1008, reason=reason)
+                    return
                 message = json.loads(raw)
                 msg_type = str(message.get("type", "UNKNOWN"))
+                if not authorize_ws_message_type(principal, msg_type):
+                    ws_status = "auth_forbidden"
+                    record_error(
+                        "WS_SCOPE_FORBIDDEN",
+                        "WS",
+                        session_id=session_id,
+                        message_type=msg_type,
+                        subject=principal.subject,
+                    )
+                    await send_event(
+                        websocket,
+                        StreamTokenEvent(payload=StreamTokenPayload(delta="Escopo insuficiente para ação WS.")),
+                    )
+                    continue
 
                 if msg_type == "INTENT_SUBMIT":
                     await handle_intent(websocket, manager, message)
@@ -101,7 +154,7 @@ async def send_event(ws: WebSocket, event: ServerEvent) -> None:
 
 
 def _secret_key() -> bytes:
-    return os.getenv("GRIMOIRE_PACT_HMAC_SECRET", "dev-insecure-secret").encode()
+    return get_current_pact_secret()
 
 
 def _normalize_session_id(session_id: str) -> str:
@@ -552,7 +605,7 @@ async def handle_pact_resolve(ws: WebSocket, manager: StateManager, message: dic
         )
         return
 
-    if not pact.verify_signature(_secret_key()):
+    if not verify_pact_signature(pact):
         await update_pact_status(pact_id, "ABORTED")
         await record_pact_audit_event(
             pact_id,

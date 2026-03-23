@@ -12,6 +12,7 @@ from app.core.entity_loader import load_and_validate_entities
 from app.persistence.sqlite_layer import check_sqlite_runtime_support, init_db
 from app.rag.ingestion import index_obsidian_vault
 from app.rag.jit_prompting import DogmasWatcher
+from app.security import get_current_pact_secret, setup_auth_tokens
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("grimoire")
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
 
     indexed_docs = index_obsidian_vault()
     logger.info("RAG index inicial: %s documento(s) Obsidian.", indexed_docs)
+
+    setup_auth_tokens()
+    _ = get_current_pact_secret()
+    logger.info("Segurança inicializada (vault/auth/rate-limit).")
 
     yield
 

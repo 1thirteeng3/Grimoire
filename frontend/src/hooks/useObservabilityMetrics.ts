@@ -25,6 +25,10 @@ export function useObservabilityMetrics() {
     () => import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
     []
   );
+  const bearerToken = useMemo(
+    () => import.meta.env.VITE_API_BEARER_TOKEN ?? "",
+    []
+  );
   const jsonEndpoint = `${apiBaseUrl}/api/v1/observability/metrics`;
   const prometheusEndpoint = `${apiBaseUrl}/metrics`;
 
@@ -39,7 +43,8 @@ export function useObservabilityMetrics() {
     try {
       const response = await fetch(prometheusEndpoint, {
         headers: {
-          Accept: "text/plain"
+          Accept: "text/plain",
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {})
         }
       });
       if (!response.ok) {
@@ -52,13 +57,14 @@ export function useObservabilityMetrics() {
     } finally {
       setPrometheusLastCheckedAt(Date.now());
     }
-  }, [prometheusEndpoint]);
+  }, [bearerToken, prometheusEndpoint]);
 
   const fetchSnapshot = useCallback(async () => {
     try {
       const response = await fetch(jsonEndpoint, {
         headers: {
-          Accept: "application/json"
+          Accept: "application/json",
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {})
         }
       });
       if (!response.ok) {
@@ -74,7 +80,7 @@ export function useObservabilityMetrics() {
     } finally {
       setIsLoading(false);
     }
-  }, [jsonEndpoint]);
+  }, [bearerToken, jsonEndpoint]);
 
   useEffect(() => {
     void fetchSnapshot();

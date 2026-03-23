@@ -230,6 +230,49 @@ Prometheus retention defaults in compose:
 - `--storage.tsdb.retention.time=15d`
 - `--storage.tsdb.retention.size=2GB`
 
+### SLI/SLO definitions (post-go-live, priority P2)
+
+Machine-readable SLO spec:
+
+- `ops/monitoring/slo.yml`
+
+Current objectives (rolling 30d):
+
+- WS availability >= 99.5%
+- WS error ratio <= 1.0%
+- RAG avg latency <= 1200 ms
+- LLM avg latency <= 3500 ms
+
+API endpoint for SLO observability:
+
+- `GET /api/v1/observability/slo`
+
+### Alert calibration with real traffic
+
+Alerting rules now combine:
+
+- dynamic 24h baseline (`avg_over_time`) with multipliers
+- minimum traffic guards (avoid noisy low-volume windows)
+- fallback absolute thresholds for cold start / baseline gaps
+
+This keeps alerts sensitive to regression while adapting to real production load.
+
+### Incident runbooks
+
+Runbooks are available under `ops/runbooks`:
+
+- `incident-availability.md`
+- `incident-llm-timeout.md`
+- `incident-prompt-bloat.md`
+- `incident-rag-degradation.md`
+
+These runbooks are scoped as **P2 short-term post-go-live** and include:
+
+- detection signals
+- immediate mitigation
+- rollback trigger points
+- stabilization and post-incident actions
+
 Configured alert rules:
 
 - `GrimoireLLMProviderTimeoutHigh`

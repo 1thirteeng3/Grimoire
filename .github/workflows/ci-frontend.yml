@@ -1,0 +1,42 @@
+name: frontend-ci
+
+on:
+  push:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci-frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend deps for schema export
+        run: pip install uv
+      - name: Sync backend environment
+        working-directory: backend
+        run: python -m uv sync --extra dev
+      - name: Export REST schema
+        run: make export-schema
+      - name: Export WS schema
+        run: make export-ws-schema
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - working-directory: frontend
+        run: npm install
+      - working-directory: frontend
+        run: npm run generate-types
+      - working-directory: frontend
+        run: npm run typecheck
+      - name: Build (Vite + React transform)
+        working-directory: frontend
+        run: npm run build
+        env:
+          CI: "true"

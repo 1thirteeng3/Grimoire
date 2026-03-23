@@ -1,0 +1,1 @@
+"""Grimoire backend application package."""

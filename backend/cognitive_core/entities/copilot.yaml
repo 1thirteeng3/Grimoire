@@ -1,0 +1,11 @@
+entity_id: copilot-introspector
+name: Copilot
+priority: 90
+tier_lock: 1
+bind_domains:
+  - meta_orchestration
+role: introspector
+critic_constitution:
+  bind_domains:
+    - meta_orchestration
+  required_tags: []

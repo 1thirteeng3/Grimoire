@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import settings
-from app.persistence.sqlite_layer import fetch_session_summary
+from app.persistence.db import fetch_session_summary
 
 logger = logging.getLogger("grimoire.memory")
 

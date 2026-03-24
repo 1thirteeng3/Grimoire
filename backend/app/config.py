@@ -14,9 +14,13 @@ class Settings(BaseSettings):
     deployment_tier: str = "cloud"
 
     data_path: Path = Path("./data")
+    backup_path: Path = Path("./data/backups")
     onnx_model_path: Path = Path("./models/bge-reranker-v2-m3-onnx")
     vault_path: Path = Path("./vault")
     entities_path: Path = Path("./cognitive_core/entities")
+
+    persistence_backend: str = "sqlite"
+    postgres_dsn: str = ""
 
     qdrant_mode: str = "path"
     qdrant_url: str = "http://localhost:6333"
@@ -44,6 +48,30 @@ class Settings(BaseSettings):
 
     pact_ttl_seconds: int = 3600
     max_constitution_tokens: int = 4096
+    pact_secret_current_vault_key: str = "pact_hmac_secret_current"
+    pact_secret_previous_vault_key: str = "pact_hmac_secret_previous"
+    pact_secret_rotation_seconds: int = 2_592_000
+
+    auth_required: bool = False
+    auth_admin_token_vault_key: str = "auth_admin_token"
+    auth_observer_token_vault_key: str = "auth_observer_token"
+    auth_token_nbytes: int = 32
+    metrics_require_auth: bool = False
+
+    rest_rate_limit_per_minute: int = 120
+    ws_rate_limit_per_minute_per_ip: int = 240
+    ws_rate_limit_per_minute_per_session: int = 180
+    ws_max_message_chars: int = 20_000
+
+    retention_audit_days: int = 90
+    retention_routing_days: int = 30
+    retention_session_summary_days: int = 30
+    retention_maintenance_interval_seconds: int = 3600
+    metrics_retention_seconds: int = 86400
+
+    enable_file_logging: bool = False
+    log_file_path: Path = Path("./data/logs/grimoire.log")
+    log_retention_days: int = 14
 
     default_operator_model: str = "deepseek-chat"
     default_inquisitor_model: str = "deepseek-reasoner"

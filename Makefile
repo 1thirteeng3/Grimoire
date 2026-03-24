@@ -1,16 +1,19 @@
-.PHONY: setup bootstrap-agent sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env
+.PHONY: setup bootstrap-agent ensure-uv sync-backend sync-frontend download-models export-schema export-ws-schema generate-types backend-dev frontend-dev test backend-test-cov backend-e2e frontend-verify verify lint check-env monitoring-up monitoring-down monitoring-logs backup-db restore-db retention-run db-migrate db-rollback deploy-validate release-staging release-production rollback-deploy
 
 setup:
 	$(MAKE) bootstrap-agent
 
 bootstrap-agent:
-	python3 -m pip install --upgrade pip uv
+	$(MAKE) ensure-uv
 	$(MAKE) sync-backend
 	$(MAKE) sync-frontend
 	$(MAKE) generate-types
 	@echo "✓ Ambiente pronto para backend+frontend"
 
-sync-backend:
+ensure-uv:
+	@python3 -m uv --version >/dev/null 2>&1 || (python3 -m pip install --upgrade pip uv && python3 -m uv --version)
+
+sync-backend: ensure-uv
 	if [ -f backend/uv.lock ]; then cd backend && python3 -m uv sync --extra dev --frozen; else cd backend && python3 -m uv sync --extra dev; fi
 
 sync-frontend:
@@ -58,3 +61,42 @@ lint: sync-backend sync-frontend
 
 check-env:
 	python3 scripts/setup_env.py
+
+monitoring-up:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml up -d
+
+monitoring-down:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml down
+
+monitoring-logs:
+	docker compose -f ops/monitoring/docker-compose.monitoring.yml logs -f --tail=200
+
+backup-db: sync-backend
+	python3 scripts/backup_db.py
+
+restore-db: sync-backend
+	@test -n "$(BACKUP_FILE)" || (echo "Use: make restore-db BACKUP_FILE=/path/backup"; exit 1)
+	python3 scripts/restore_db.py --input "$(BACKUP_FILE)"
+
+retention-run: sync-backend
+	cd backend && PYTHONPATH=. python3 -m uv run python3 -c "import asyncio; from app.persistence.maintenance import run_retention_cycle; print(asyncio.run(run_retention_cycle()))"
+
+db-migrate: sync-backend
+	python3 scripts/migrate_db.py
+
+db-rollback: sync-backend
+	python3 scripts/rollback_db.py --steps $(or $(STEPS),1)
+
+deploy-validate:
+	python3 ops/deploy/deployctl.py validate-env-mirror
+
+release-staging:
+	@test -n "$(VERSION)" || (echo "Use: make release-staging VERSION=vX.Y.Z [STRATEGY=blue-green|canary] [CANARY_WEIGHT=10] [PROMOTE=1]"; exit 1)
+	python3 ops/deploy/deployctl.py release --env staging --version "$(VERSION)" --strategy "$(or $(STRATEGY),blue-green)" --canary-weight "$(or $(CANARY_WEIGHT),10)" $(if $(PROMOTE),--promote,)
+
+release-production:
+	@test -n "$(VERSION)" || (echo "Use: make release-production VERSION=vX.Y.Z [STRATEGY=blue-green|canary] [CANARY_WEIGHT=10] [PROMOTE=1]"; exit 1)
+	python3 ops/deploy/deployctl.py release --env production --version "$(VERSION)" --strategy "$(or $(STRATEGY),blue-green)" --canary-weight "$(or $(CANARY_WEIGHT),10)" $(if $(PROMOTE),--promote,)
+
+rollback-deploy:
+	python3 ops/deploy/deployctl.py rollback --env "$(or $(ENV),production)" --strategy "$(or $(STRATEGY),auto)" $(if $(TO_VERSION),--to-version "$(TO_VERSION)",)

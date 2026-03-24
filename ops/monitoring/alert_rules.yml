@@ -1,0 +1,179 @@
+groups:
+  - name: grimoire-sli-recording-rules
+    rules:
+      - record: grimoire:sli:ws_ops_per_sec:5m
+        expr: rate(grimoire_stage_operations_total{stage="WS"}[5m])
+
+      - record: grimoire:sli:ws_error_ratio:5m
+        expr: |
+          rate(grimoire_stage_errors_total{stage="WS"}[5m])
+          /
+          clamp_min(rate(grimoire_stage_operations_total{stage="WS"}[5m]), 0.001)
+
+      - record: grimoire:sli:ws_availability:5m
+        expr: 1 - grimoire:sli:ws_error_ratio:5m
+
+      - record: grimoire:sli:ws_error_ratio:30m
+        expr: |
+          rate(grimoire_stage_errors_total{stage="WS"}[30m])
+          /
+          clamp_min(rate(grimoire_stage_operations_total{stage="WS"}[30m]), 0.001)
+
+      - record: grimoire:sli:ws_availability:30m
+        expr: 1 - grimoire:sli:ws_error_ratio:30m
+
+      - record: grimoire:sli:rag_avg_latency_ms:5m
+        expr: |
+          rate(grimoire_stage_latency_ms_total{stage="RAG"}[5m])
+          /
+          clamp_min(rate(grimoire_stage_operations_total{stage="RAG"}[5m]), 0.001)
+
+      - record: grimoire:sli:llm_avg_latency_ms:5m
+        expr: |
+          rate(grimoire_stage_latency_ms_total{stage="LLM"}[5m])
+          /
+          clamp_min(rate(grimoire_stage_operations_total{stage="LLM"}[5m]), 0.001)
+
+      - record: grimoire:sli:llm_timeout_events_10m
+        expr: increase(grimoire_errors_total{stage="LLM",error_type="LLM_PROVIDER_TIMEOUT"}[10m])
+
+      - record: grimoire:sli:prompt_bloat_events_15m
+        expr: increase(grimoire_errors_total{stage="RAG",error_type="PROMPT_BLOAT"}[15m])
+
+      - record: grimoire:baseline:rag_avg_latency_ms:24h
+        expr: avg_over_time(grimoire:sli:rag_avg_latency_ms:5m[24h])
+
+      - record: grimoire:baseline:llm_avg_latency_ms:24h
+        expr: avg_over_time(grimoire:sli:llm_avg_latency_ms:5m[24h])
+
+      - record: grimoire:baseline:llm_timeout_events_10m:24h
+        expr: avg_over_time(grimoire:sli:llm_timeout_events_10m[24h])
+
+      - record: grimoire:baseline:prompt_bloat_events_15m:24h
+        expr: avg_over_time(grimoire:sli:prompt_bloat_events_15m[24h])
+
+  - name: grimoire-operational-alerts
+    rules:
+      - alert: GrimoireAvailabilitySLOWarning
+        expr: |
+          grimoire:sli:ws_availability:30m < 0.995
+          and grimoire:sli:ws_ops_per_sec:5m > 0.02
+        for: 15m
+        labels:
+          severity: warning
+          service: grimoire-backend
+          component: ws
+          priority: p2
+          slo: availability
+        annotations:
+          summary: "SLO de disponibilidade em risco (30m)"
+          description: "Disponibilidade WS em 30m abaixo de 99.5% sob tráfego real."
+          runbook: "ops/runbooks/incident-availability.md"
+
+      - alert: GrimoireAvailabilitySLOCritical
+        expr: |
+          grimoire:sli:ws_availability:5m < 0.99
+          and grimoire:sli:ws_ops_per_sec:5m > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          service: grimoire-backend
+          component: ws
+          priority: p2
+          slo: availability
+        annotations:
+          summary: "SLO de disponibilidade violado (5m)"
+          description: "Disponibilidade WS abaixo de 99.0% no curto prazo sob tráfego real."
+          runbook: "ops/runbooks/incident-availability.md"
+
+      - alert: GrimoireLLMProviderTimeoutHigh
+        expr: |
+          (
+            (
+              grimoire:sli:llm_timeout_events_10m
+              >
+              clamp_min(grimoire:baseline:llm_timeout_events_10m:24h * 2.0, 3)
+            )
+            or
+            (grimoire:sli:llm_timeout_events_10m >= 6)
+          )
+          and rate(grimoire_stage_operations_total{stage="LLM"}[5m]) > 0.02
+        for: 5m
+        labels:
+          severity: critical
+          service: grimoire-backend
+          component: llm
+          priority: p2
+        annotations:
+          summary: "Timeouts no provedor LLM acima do limiar"
+          description: "Timeouts LLM excederam baseline de 24h (2x) com piso absoluto >=3/10m."
+          runbook: "ops/runbooks/incident-llm-timeout.md"
+
+      - alert: GrimoirePromptBloatRecurring
+        expr: |
+          (
+            (
+              grimoire:sli:prompt_bloat_events_15m
+              >
+              clamp_min(grimoire:baseline:prompt_bloat_events_15m:24h * 2.0, 5)
+            )
+            or
+            (grimoire:sli:prompt_bloat_events_15m >= 8)
+          )
+          and rate(grimoire_stage_operations_total{stage="RAG"}[5m]) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+          service: grimoire-backend
+          component: rag
+          priority: p2
+        annotations:
+          summary: "PROMPT_BLOAT recorrente"
+          description: "Prompt bloat acima do baseline de tráfego real (2x) com piso absoluto >=5/15m."
+          runbook: "ops/runbooks/incident-prompt-bloat.md"
+
+      - alert: GrimoireRAGAverageLatencyHigh
+        expr: |
+          (
+            (
+              grimoire:sli:rag_avg_latency_ms:5m
+              >
+              clamp_min(grimoire:baseline:rag_avg_latency_ms:24h * 1.5, 1200)
+            )
+            or
+            (grimoire:sli:rag_avg_latency_ms:5m > 1800)
+          )
+          and rate(grimoire_stage_operations_total{stage="RAG"}[5m]) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          service: grimoire-backend
+          component: rag
+          priority: p2
+        annotations:
+          summary: "Latencia media de RAG acima do limiar"
+          description: "RAG acima do baseline de 24h (1.5x) com piso de 1200ms por 10m."
+          runbook: "ops/runbooks/incident-rag-degradation.md"
+
+      - alert: GrimoireLLMAverageLatencyHigh
+        expr: |
+          (
+            (
+              grimoire:sli:llm_avg_latency_ms:5m
+              >
+              clamp_min(grimoire:baseline:llm_avg_latency_ms:24h * 1.5, 3500)
+            )
+            or
+            (grimoire:sli:llm_avg_latency_ms:5m > 5000)
+          )
+          and rate(grimoire_stage_operations_total{stage="LLM"}[5m]) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+          service: grimoire-backend
+          component: llm
+          priority: p2
+        annotations:
+          summary: "Latencia media de LLM acima do limiar"
+          description: "LLM acima do baseline de 24h (1.5x) com piso de 3500ms por 10m."
+          runbook: "ops/runbooks/incident-llm-timeout.md"

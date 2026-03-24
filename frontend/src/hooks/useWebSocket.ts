@@ -10,6 +10,8 @@ const WS_URL = "ws://127.0.0.1:8000/ws";
 const PING_INTERVAL_MS = 15_000;
 const PONG_TIMEOUT_MS = 5_000;
 const MAX_BACKOFF_MS = 30_000;
+const WS_AUTH_TOKEN =
+  import.meta.env.VITE_WS_BEARER_TOKEN ?? import.meta.env.VITE_API_BEARER_TOKEN ?? "";
 
 export function useWebSocket(sessionId: string) {
   const ws = useRef<WebSocket | null>(null);
@@ -22,7 +24,8 @@ export function useWebSocket(sessionId: string) {
     if (!shouldReconnect.current) {
       return;
     }
-    ws.current = new WebSocket(`${WS_URL}/${sessionId}`);
+    const tokenQuery = WS_AUTH_TOKEN ? `?token=${encodeURIComponent(WS_AUTH_TOKEN)}` : "";
+    ws.current = new WebSocket(`${WS_URL}/${sessionId}${tokenQuery}`);
     ws.current.onopen = () => {
       useSystemStore.getState().setConnected(true);
       backoff.current = 1000;

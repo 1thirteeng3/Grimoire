@@ -1,0 +1,206 @@
+name: release-pipeline
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "release or rollback"
+        type: choice
+        required: true
+        default: release
+        options: [release, rollback]
+      version:
+        description: "Release version (required for release via dispatch)"
+        required: false
+        type: string
+      strategy:
+        description: "Release strategy"
+        type: choice
+        required: false
+        default: blue-green
+        options: [blue-green, canary]
+      canary_weight:
+        description: "Canary traffic percentage"
+        required: false
+        default: "10"
+        type: string
+      promote_canary:
+        description: "Promote canary to stable"
+        required: false
+        default: false
+        type: boolean
+      deploy_production:
+        description: "Deploy to production after staging"
+        required: false
+        default: true
+        type: boolean
+      rollback_env:
+        description: "Environment for rollback"
+        required: false
+        default: production
+        type: choice
+        options: [staging, production]
+      rollback_strategy:
+        description: "Rollback strategy"
+        required: false
+        default: auto
+        type: choice
+        options: [auto, blue-green, canary]
+      rollback_to_version:
+        description: "Optional rollback target version"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  mirror-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate staging/prod mirror configuration
+        run: python3 ops/deploy/deployctl.py validate-env-mirror
+
+  verify:
+    if: github.event_name == 'push' || github.event.inputs.action == 'release'
+    needs: mirror-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Full verification before release
+        run: make backend-test-cov frontend-verify
+
+  release-manifest:
+    if: github.event_name == 'push' || github.event.inputs.action == 'release'
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Resolve release version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          if [ -z "${VERSION}" ]; then
+            echo "version is required for release workflow_dispatch" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: Generate release manifest
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          manifest = {
+              "version": os.environ["VERSION"],
+              "commit": os.environ["GITHUB_SHA"],
+              "generated_at": os.popen("date -u +%Y-%m-%dT%H:%M:%SZ").read().strip(),
+          }
+          out = pathlib.Path("release-manifest.json")
+          out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+          print(out.read_text(encoding="utf-8"))
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ steps.version.outputs.version }}
+          path: release-manifest.json
+
+  deploy-staging:
+    if: github.event_name == 'push' || github.event.inputs.action == 'release'
+    needs: release-manifest
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Deploy to mirrored staging
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy }}"
+          if [ -z "${STRATEGY}" ]; then STRATEGY="blue-green"; fi
+          CANARY_WEIGHT="${{ github.event.inputs.canary_weight }}"
+          if [ -z "${CANARY_WEIGHT}" ]; then CANARY_WEIGHT="10"; fi
+
+          ARGS=(release --env staging --version "${VERSION}" --strategy "${STRATEGY}" --canary-weight "${CANARY_WEIGHT}")
+          if [ "${{ github.event.inputs.promote_canary }}" = "true" ]; then
+            ARGS+=(--promote)
+          fi
+          python3 ops/deploy/deployctl.py "${ARGS[@]}"
+        env:
+          VERSION: ${{ needs.release-manifest.outputs.version }}
+      - name: Show staging deployment state
+        run: python3 ops/deploy/deployctl.py print-state --env staging
+
+  deploy-production:
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.event.inputs.action == 'release' &&
+       github.event.inputs.deploy_production == 'true')
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Deploy to production
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy }}"
+          if [ -z "${STRATEGY}" ]; then STRATEGY="blue-green"; fi
+          CANARY_WEIGHT="${{ github.event.inputs.canary_weight }}"
+          if [ -z "${CANARY_WEIGHT}" ]; then CANARY_WEIGHT="10"; fi
+          ARGS=(release --env production --version "${VERSION}" --strategy "${STRATEGY}" --canary-weight "${CANARY_WEIGHT}")
+          if [ "${{ github.event.inputs.promote_canary }}" = "true" ]; then
+            ARGS+=(--promote)
+          fi
+          python3 ops/deploy/deployctl.py "${ARGS[@]}"
+        env:
+          VERSION: ${{ needs.release-manifest.outputs.version }}
+      - name: Show production deployment state
+        run: python3 ops/deploy/deployctl.py print-state --env production
+
+  rollback:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
+    needs: mirror-check
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Execute rollback
+        run: |
+          ARGS=(rollback --env "${{ github.event.inputs.rollback_env }}" --strategy "${{ github.event.inputs.rollback_strategy }}")
+          if [ -n "${{ github.event.inputs.rollback_to_version }}" ]; then
+            ARGS+=(--to-version "${{ github.event.inputs.rollback_to_version }}")
+          fi
+          python3 ops/deploy/deployctl.py "${ARGS[@]}"
+      - name: Show rollback state
+        run: python3 ops/deploy/deployctl.py print-state --env "${{ github.event.inputs.rollback_env }}"

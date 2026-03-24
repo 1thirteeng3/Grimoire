@@ -9,11 +9,13 @@ from httpx import AsyncClient
 
 
 def _sign(session_id: str, tool_name: str, args: dict) -> str:
+    from app.security.pact_secret import get_current_pact_secret
+
     payload = json.dumps(
         {"session_id": session_id, "tool_name": tool_name, "args": args},
         sort_keys=True,
     )
-    digest = hmac.new(b"dev-insecure-secret", payload.encode(), hashlib.sha256).hexdigest()
+    digest = hmac.new(get_current_pact_secret(), payload.encode(), hashlib.sha256).hexdigest()
     return f"sha256={digest}"
 
 

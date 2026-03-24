@@ -9,6 +9,23 @@ import subprocess
 import sys
 
 
+def _node_major_version() -> int | None:
+    node_path = shutil.which("node")
+    if node_path is None:
+        return None
+    try:
+        out = subprocess.check_output([node_path, "--version"], text=True).strip()
+    except Exception:
+        return None
+    if out.startswith("v"):
+        out = out[1:]
+    major = out.split(".", 1)[0]
+    try:
+        return int(major)
+    except ValueError:
+        return None
+
+
 def check(name: str, condition: bool, fix_msg: str) -> bool:
     if condition:
         print(f"  ✓ {name}")
@@ -31,7 +48,12 @@ def main() -> None:
     if not ok:
         failures.append("python")
 
-    ok = check("Node.js 20+", shutil.which("node") is not None, "Instalar Node.js 20 LTS em nodejs.org")
+    node_major = _node_major_version()
+    ok = check(
+        "Node.js 20+",
+        node_major is not None and node_major >= 20,
+        "Instalar Node.js 20 LTS em nodejs.org",
+    )
     if not ok:
         failures.append("node")
 

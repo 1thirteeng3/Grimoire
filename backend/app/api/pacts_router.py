@@ -1,23 +1,23 @@
 import json
-import os
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.models.pacts import StatelessPactModel, ToolCallIntent
-from app.persistence.sqlite_layer import (
+from app.persistence.db import (
     fetch_pact,
     fetch_pact_any_status,
     fetch_pact_audit_events,
     record_pact_audit_event,
     update_pact_status,
 )
+from app.security import require_scopes_dep, rest_rate_limit_dep, verify_pact_signature
 
-router = APIRouter(tags=["pacts"])
+router = APIRouter(tags=["pacts"], dependencies=[Depends(rest_rate_limit_dep())])
 
 
 class PactResolveRequest(BaseModel):
@@ -25,12 +25,11 @@ class PactResolveRequest(BaseModel):
     modified_arguments: dict = Field(default_factory=dict)
 
 
-def _secret_key() -> bytes:
-    return os.getenv("GRIMOIRE_PACT_HMAC_SECRET", "dev-insecure-secret").encode()
-
-
 @router.get("/pacts/{pact_id}/audit")
-async def get_pact_audit(pact_id: str):
+async def get_pact_audit(
+    pact_id: str,
+    _principal=Depends(require_scopes_dep("pacts:read")),
+):
     pact_row = await fetch_pact_any_status(pact_id)
     if pact_row is None:
         return JSONResponse(status_code=404, content={"error_code": "PACT_NOT_FOUND"})
@@ -46,7 +45,11 @@ async def get_pact_audit(pact_id: str):
 
 
 @router.post("/pacts/{pact_id}/resolve")
-async def resolve_pact(pact_id: str, payload: PactResolveRequest):
+async def resolve_pact(
+    pact_id: str,
+    payload: PactResolveRequest,
+    _principal=Depends(require_scopes_dep("pacts:write")),
+):
     row = await fetch_pact(pact_id)
     if row is None:
         return JSONResponse(status_code=404, content={"error_code": "PACT_NOT_FOUND"})
@@ -79,7 +82,7 @@ async def resolve_pact(pact_id: str, payload: PactResolveRequest):
             },
         )
 
-    if not pact.verify_signature(_secret_key()):
+    if not verify_pact_signature(pact):
         await record_pact_audit_event(
             pact_id,
             pact.session_id,

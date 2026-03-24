@@ -7,58 +7,12 @@ from typing import Any
 from uuid import uuid4
 
 import aiosqlite
+from app.persistence.migrations import apply_migrations_sqlite, rollback_migrations_sqlite
 
 logger = logging.getLogger("grimoire.sqlite")
 DB_PATH: Path | None = None
 _SQLITE_VERSION = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
 _HAS_RETURNING = _SQLITE_VERSION >= (3, 35, 0)
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS pending_pacts (
-    pact_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    entity_manifest_hash TEXT NOT NULL,
-    fsm_status TEXT NOT NULL DEFAULT 'PENDING_HUMAN_CONFLICT',
-    operator_proposal_raw TEXT NOT NULL,
-    tool_intent_json TEXT NOT NULL,
-    critic_report_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    ttl_timestamp TEXT NOT NULL,
-    cryptographic_signature TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS session_summaries (
-    summary_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    summary_text TEXT NOT NULL,
-    domain TEXT
-);
-
-CREATE TABLE IF NOT EXISTS routing_events (
-    event_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    domain TEXT NOT NULL,
-    feedback_score REAL NOT NULL,
-    edit_delta REAL,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS pact_audit_events (
-    event_id TEXT PRIMARY KEY,
-    pact_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    detail_json TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_pacts_ttl ON pending_pacts(ttl_timestamp);
-CREATE INDEX IF NOT EXISTS idx_pacts_session ON pending_pacts(session_id);
-CREATE INDEX IF NOT EXISTS idx_pact_audit_pact ON pact_audit_events(pact_id);
-CREATE INDEX IF NOT EXISTS idx_pact_audit_session ON pact_audit_events(session_id);
-"""
 
 
 def _ensure_db_path() -> Path:
@@ -83,11 +37,22 @@ def check_sqlite_runtime_support() -> None:
 async def init_db(db_path: Path) -> None:
     global DB_PATH
     DB_PATH = db_path
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(db_path) as db:
-        await db.executescript(SCHEMA)
-        await db.commit()
-    logger.info("Schema SQLite inicializado: %s", db_path)
+    applied = await apply_migrations_sqlite(db_path)
+    logger.info("SQLite inicializado: %s (migrations aplicadas=%s)", db_path, len(applied))
+
+
+async def migrate(target_version: str | None = None) -> list[str]:
+    applied = await apply_migrations_sqlite(_ensure_db_path(), target_version=target_version)
+    if applied:
+        logger.info("SQLite migrations aplicadas: %s", applied)
+    return applied
+
+
+async def rollback_migrations(steps: int = 1) -> list[str]:
+    reverted = await rollback_migrations_sqlite(_ensure_db_path(), steps=steps)
+    if reverted:
+        logger.warning("SQLite rollback aplicado: %s", reverted)
+    return reverted
 
 
 async def save_pact(pact_json: str, pact_id: str) -> None:
@@ -208,3 +173,93 @@ async def fetch_pact_audit_events(pact_id: str) -> list[dict[str, Any]]:
         event["detail_json"] = json.loads(event.get("detail_json") or "{}")
         events.append(event)
     return events
+
+
+async def purge_old_audit_events(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM pact_audit_events
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING event_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM pact_audit_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM pact_audit_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)
+
+
+async def purge_old_routing_events(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM routing_events
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING event_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM routing_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM routing_events WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)
+
+
+async def purge_old_session_summaries(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    modifier = f"-{int(retention_days)} days"
+    async with aiosqlite.connect(_ensure_db_path()) as db:
+        if _HAS_RETURNING:
+            cur = await db.execute(
+                """
+                DELETE FROM session_summaries
+                WHERE datetime(created_at) < datetime('now', ?)
+                RETURNING summary_id
+                """,
+                (modifier,),
+            )
+            deleted = len(await cur.fetchall())
+        else:
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM session_summaries WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+            count_row = await count_cur.fetchone()
+            deleted = count_row[0] if count_row else 0
+            await db.execute(
+                "DELETE FROM session_summaries WHERE datetime(created_at) < datetime('now', ?)",
+                (modifier,),
+            )
+        await db.commit()
+    return int(deleted)

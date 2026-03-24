@@ -1,0 +1,53 @@
+version: 1
+service: grimoire-backend
+window: rolling_30d
+priority: p2
+slis:
+  - name: ws_availability
+    target: 0.995
+    unit: ratio
+    source: prometheus
+    query: |
+      1 - (
+        rate(grimoire_stage_errors_total{stage="WS"}[5m])
+        /
+        clamp_min(rate(grimoire_stage_operations_total{stage="WS"}[5m]), 0.001)
+      )
+    notes: "Proxy de disponibilidade operacional por mensagens WS."
+
+  - name: ws_error_ratio
+    target: 0.01
+    unit: ratio
+    source: prometheus
+    query: |
+      rate(grimoire_stage_errors_total{stage="WS"}[5m])
+      /
+      clamp_min(rate(grimoire_stage_operations_total{stage="WS"}[5m]), 0.001)
+    notes: "SLO de erro agregado do pipeline WS."
+
+  - name: rag_avg_latency_ms
+    target: 1200
+    unit: milliseconds
+    source: prometheus
+    query: |
+      rate(grimoire_stage_latency_ms_total{stage="RAG"}[5m])
+      /
+      clamp_min(rate(grimoire_stage_operations_total{stage="RAG"}[5m]), 0.001)
+    notes: "Latência média RAG alvo para pós-go-live."
+
+  - name: llm_avg_latency_ms
+    target: 3500
+    unit: milliseconds
+    source: prometheus
+    query: |
+      rate(grimoire_stage_latency_ms_total{stage="LLM"}[5m])
+      /
+      clamp_min(rate(grimoire_stage_operations_total{stage="LLM"}[5m]), 0.001)
+    notes: "Latência média LLM alvo para pós-go-live."
+
+calibration_policy:
+  method: "dynamic-baseline"
+  baseline_window: "24h"
+  multiplier: 1.5
+  fallback_absolute_thresholds: true
+  minimum_traffic_guard: true
